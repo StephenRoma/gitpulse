@@ -1,11 +1,12 @@
 import os
+import json
 import anthropic
 from dotenv import load_dotenv
 import database as db
 
 load_dotenv()
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 BRIEFING_SYSTEM = """You are a sales intelligence analyst for Relevantz, a technology services company.
 Your job is to analyze GitHub activity signals from engineers at target companies and generate 
@@ -76,8 +77,7 @@ GitHub Signals (last 30 days):
 
 Generate the briefing JSON now."""
 
-    import json
-    response = client.messages.create(
+    response = await client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1500,
         system=BRIEFING_SYSTEM,

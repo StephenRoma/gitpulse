@@ -1,56 +1,39 @@
-import { Navbar, Button, Spinner, Tooltip, Intent } from '@blueprintjs/core'
-import { useState } from 'react'
-import { api } from '../api'
+﻿import { useState } from 'react'
 
-export default function TopNav({ onSyncAll, onAddAccount, apiHealth }) {
-  const [syncing, setSyncing] = useState(false)
+export default function TopNav({ accounts = [], onAddAccount }) {
+  const lastSynced = accounts.reduce((latest, a) => {
+    if (!a.last_synced) return latest
+    const d = new Date(a.last_synced)
+    return d > latest ? d : latest
+  }, new Date(0))
 
-  async function handleSyncAll() {
-    setSyncing(true)
-    try {
-      await api.syncAll()
-      onSyncAll?.()
-    } finally {
-      setTimeout(() => setSyncing(false), 2000)
-    }
-  }
+  const syncLabel = lastSynced.getTime() > 0
+    ? `Synced ${lastSynced.toLocaleDateString()}`
+    : 'No sync yet'
 
   return (
-    <Navbar className="bp5-dark gp-topnav">
-      <Navbar.Group align="left">
-        <div className="gp-logo">
-          <div className="gp-logo-mark">⚡</div>
-          GitPulse
-          <span className="gp-logo-sub">by Relevantz</span>
+    <div className="gp-topnav">
+      <div className="gp-logo">
+        <div className="gp-logo-mark">G</div>
+        <div className="gp-logo-name">Git<span>Pulse</span></div>
+        <div className="gp-logo-beta">BETA</div>
+      </div>
+
+      <div className="gp-nav-pills">
+        <button className="gp-nav-pill active">Dashboard</button>
+        <button className="gp-nav-pill">Accounts</button>
+        <button className="gp-nav-pill">Reports</button>
+      </div>
+
+      <div className="gp-nav-right">
+        <div className="nav-live">
+          <span className="nav-live-dot" />
+          <span>{syncLabel}</span>
         </div>
-      </Navbar.Group>
-
-      <Navbar.Group align="right" style={{ gap: 12 }}>
-        {apiHealth && (
-          <div className="nav-status">
-            <div className="nav-status-dot" />
-            API Connected
-          </div>
-        )}
-
-        <Button
-          icon="refresh"
-          text={syncing ? 'Syncing…' : 'Sync All'}
-          intent={Intent.NONE}
-          minimal
-          loading={syncing}
-          onClick={handleSyncAll}
-          className="bp5-dark"
-          style={{ color: 'var(--text-secondary)' }}
-        />
-
-        <Button
-          icon="plus"
-          text="Add Account"
-          intent={Intent.PRIMARY}
-          onClick={onAddAccount}
-        />
-      </Navbar.Group>
-    </Navbar>
+        <div className="nav-divider" />
+        <button className="nav-add-btn" onClick={onAddAccount}>+ Add Account</button>
+        <div className="nav-avatar">RV</div>
+      </div>
+    </div>
   )
 }

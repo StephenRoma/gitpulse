@@ -1,43 +1,25 @@
-import { Dialog, Button, Intent, FormGroup, InputGroup, HTMLSelect, TextArea, Spinner } from '@blueprintjs/core'
-import { useState } from 'react'
-import { api } from '../api'
+﻿import { useState } from 'react'
+import { Dialog, FormGroup, InputGroup, Button, HTMLSelect } from '@blueprintjs/core'
 
-export default function AddAccountDialog({ isOpen, onClose, onCreated }) {
-  const [form, setForm] = useState({
-    name: '',
-    github_org: '',
-    account_type: 'prospect',
-    engineers: ''
-  })
+export default function AddAccountDialog({ isOpen, onClose, onSubmit }) {
+  const [form, setForm] = useState({ github_org: '', name: '', account_type: 'prospect' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  function update(key, val) {
-    setForm(f => ({ ...f, [key]: val }))
-    setError('')
+  function set(key) {
+    return (e) => setForm(prev => ({ ...prev, [key]: e.target ? e.target.value : e }))
   }
 
-  async function handleSubmit() {
-    if (!form.name.trim()) { setError('Account name is required'); return }
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!form.github_org.trim()) { setError('GitHub org is required'); return }
     setLoading(true)
     setError('')
     try {
-      const engineers = form.engineers
-        .split(/[\n,]+/)
-        .map(s => s.trim())
-        .filter(Boolean)
-
-      const result = await api.createAccount({
-        name: form.name.trim(),
-        github_org: form.github_org.trim(),
-        account_type: form.account_type,
-        engineers
-      })
-
-      setForm({ name: '', github_org: '', account_type: 'prospect', engineers: '' })
-      onCreated(result.id)
-    } catch (e) {
-      setError(e.message)
+      await onSubmit({ ...form, name: form.name || form.github_org })
+      setForm({ github_org: '', name: '', account_type: 'prospect' })
+    } catch (err) {
+      setError(err.message || 'Failed to create account')
     } finally {
       setLoading(false)
     }
@@ -48,71 +30,27 @@ export default function AddAccountDialog({ isOpen, onClose, onCreated }) {
       isOpen={isOpen}
       onClose={onClose}
       title="Add Account"
-      className="bp5-dark"
-      style={{ width: 480 }}
+      style={{ width: 420, borderRadius: 14 }}
     >
-      <div style={{ padding: '20px 24px 0' }}>
-        <FormGroup label="Company Name" labelInfo="(required)">
-          <InputGroup
-            placeholder="Acme Corp"
-            value={form.name}
-            onChange={e => update('name', e.target.value)}
-            large
-          />
+      <form onSubmit={handleSubmit} style={{ padding: 20 }}>
+        <FormGroup label="GitHub Organization" labelFor="org">
+          <InputGroup id="org" placeholder="e.g. facebook" value={form.github_org} onChange={set('github_org')} />
         </FormGroup>
-
-        <FormGroup label="GitHub Org / Username" helperText="The company's GitHub organization handle">
-          <InputGroup
-            placeholder="acme-corp"
-            leftElement={<span style={{ padding: '0 8px', color: 'var(--text-muted)', lineHeight: '30px' }}>@</span>}
-            value={form.github_org}
-            onChange={e => update('github_org', e.target.value)}
-          />
+        <FormGroup label="Display Name" labelFor="name">
+          <InputGroup id="name" placeholder="Optional" value={form.name} onChange={set('name')} />
         </FormGroup>
-
-        <FormGroup label="Account Type">
-          <HTMLSelect
-            value={form.account_type}
-            onChange={e => update('account_type', e.target.value)}
-            options={[
-              { value: 'prospect', label: 'Prospect' },
-              { value: 'client', label: 'Client' }
-            ]}
-            fill
-          />
+        <FormGroup label="Type">
+          <HTMLSelect value={form.account_type} onChange={set('account_type')} fill>
+            <option value="prospect">Pipeline</option>
+            <option value="client">Active Client</option>
+          </HTMLSelect>
         </FormGroup>
-
-        <FormGroup
-          label="Engineer GitHub Usernames"
-          helperText="One per line, or comma-separated. These are the individuals whose activity will be tracked."
-        >
-          <TextArea
-            placeholder={"john-doe\njane-smith\nbob-builder"}
-            value={form.engineers}
-            onChange={e => update('engineers', e.target.value)}
-            fill
-            rows={4}
-            style={{ fontFamily: 'var(--mono)', fontSize: 12 }}
-          />
-        </FormGroup>
-
-        {error && (
-          <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 12, fontFamily: 'var(--mono)' }}>
-            ⚠ {error}
-          </div>
-        )}
-      </div>
-
-      <div style={{ padding: '12px 24px 20px', display: 'flex', justifyContent: 'flex-end', gap: 8,
-        borderTop: '1px solid var(--border)', marginTop: 12 }}>
-        <Button text="Cancel" minimal onClick={onClose} />
-        <Button
-          text="Create Account"
-          intent={Intent.PRIMARY}
-          loading={loading}
-          onClick={handleSubmit}
-        />
-      </div>
+        {error && <div style={{ color: '#C8005A', marginBottom: 12, fontSize: 12 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Button minimal onClick={onClose}>Cancel</Button>
+          <Button type="submit" intent="primary" loading={loading}>Add Account</Button>
+        </div>
+      </form>
     </Dialog>
   )
 }

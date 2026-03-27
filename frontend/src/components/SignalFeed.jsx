@@ -1,11 +1,18 @@
-import { Card, Spinner } from '@blueprintjs/core'
+﻿import { Spinner } from '@blueprintjs/core'
 
-const SIGNAL_ICONS = {
-  star:     { icon: '★', cls: 'signal-icon-star',    badgeCls: 'badge-star',     label: 'Starred' },
-  fork:     { icon: '⑂', cls: 'signal-icon-fork',    badgeCls: 'badge-fork',     label: 'Forked' },
-  new_repo: { icon: '◈', cls: 'signal-icon-new_repo', badgeCls: 'badge-new_repo', label: 'New Repo' },
-  push:     { icon: '↑', cls: 'signal-icon-push',    badgeCls: 'badge-push',     label: 'Pushed' },
+const SIGNAL_ICONS   = { star: '\u2605', fork: '\u2482', new_repo: '\u25C8', push: '\u2191' }
+const SIGNAL_ACTIONS = { star: 'starred', fork: 'forked', new_repo: 'created repo', push: 'pushed to' }
+
+function sigHeat(signal) {
+  try {
+    const score = JSON.parse(signal.raw_data || '{}').sig_score || 0
+    return score >= 6 ? 'hot' : score >= 3 ? 'warm' : 'cool'
+  } catch { return 'cool' }
 }
+
+const heatFg = (h) => h === 'hot' ? '#C8005A' : h === 'warm' ? '#D97706' : '#2563EB'
+const heatBg = (h) => h === 'hot' ? '#FFF0F5' : h === 'warm' ? '#FFFBEB' : '#EFF6FF'
+const heatBd = (h) => h === 'hot' ? '#FBCFE8' : h === 'warm' ? '#FDE68A' : '#BFDBFE'
 
 function timeAgo(dateStr) {
   if (!dateStr) return ''
@@ -17,43 +24,6 @@ function timeAgo(dateStr) {
   return `${Math.floor(h / 24)}d ago`
 }
 
-function SignalCard({ signal }) {
-  const meta = SIGNAL_ICONS[signal.signal_type] || SIGNAL_ICONS.push
-  const topics = signal.repo_topics || []
-
-  return (
-    <Card className="signal-card bp5-dark" style={{ padding: '12px 14px' }}>
-      <div className="signal-row">
-        <div className={`signal-icon-wrap ${meta.cls}`}>
-          <span style={{ fontSize: 14 }}>{meta.icon}</span>
-        </div>
-
-        <div className="signal-content">
-          <div className="signal-repo-name">
-            <a href={signal.repo_url} target="_blank" rel="noreferrer">
-              {signal.repo_name}
-            </a>
-          </div>
-          {signal.repo_description && (
-            <div className="signal-desc">{signal.repo_description}</div>
-          )}
-          <div className="signal-meta">
-            <span className={`signal-type-badge ${meta.badgeCls}`}>{meta.label}</span>
-            {signal.repo_language && (
-              <span className="lang-tag">{signal.repo_language}</span>
-            )}
-            <span className="signal-engineer">@{signal.engineer_username}</span>
-            <span className="lang-tag">{timeAgo(signal.detected_at)}</span>
-            {topics.slice(0, 3).map((t, i) => (
-              <span key={i} className="topic-tag">{t}</span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
 export default function SignalFeed({ signals, loading }) {
   if (loading) {
     return (
@@ -63,9 +33,9 @@ export default function SignalFeed({ signals, loading }) {
     )
   }
 
-  if (!signals || signals.length === 0) {
+  if (!signals?.length) {
     return (
-      <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40, fontSize: 13 }}>
+      <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40, fontSize: 13, fontFamily: 'var(--mono)' }}>
         No signals yet. Run a sync to collect GitHub activity.
       </div>
     )
@@ -73,7 +43,49 @@ export default function SignalFeed({ signals, loading }) {
 
   return (
     <div>
-      {signals.map(s => <SignalCard key={s.id} signal={s} />)}
+      <div className="signal-feed-header">
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.08em', fontFamily: 'var(--mono)' }}>
+          RECENT ACTIVITY &mdash; {signals.length} EVENTS
+        </span>
+        <div className="signal-heat-filters">
+          {['hot', 'warm', 'cool'].map(h => (
+            <span key={h} className="signal-heat-chip" style={{
+              color: heatFg(h), background: heatBg(h), borderColor: heatBd(h),
+            }}>{h.toUpperCase()}</span>
+          ))}
+        </div>
+      </div>
+
+      {signals.map(s => {
+        const heat   = sigHeat(s)
+        const icon   = SIGNAL_ICONS[s.signal_type]   || '\u00B7'
+        const action = SIGNAL_ACTIONS[s.signal_type] || s.signal_type
+        return (
+          <div key={s.id} className="signal-row">
+            <div className="signal-icon-box" style={{
+              color: heatFg(heat), background: heatBg(heat), borderColor: heatBd(heat),
+            }}>{icon}</div>
+            <div className="signal-user">@{s.engineer_username}</div>
+            <div style={{ flex: 1, fontSize: 11 }}>
+              <span style={{ color: 'var(--text-faint)' }}>{action} </span>
+              <a href={s.repo_url} target="_blank" rel="noreferrer"
+                style={{ color: '#1A6B9A', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                {s.repo_name}
+              </a>
+              {s.repo_language && (
+                <span style={{ marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                  background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                  {s.repo_language}
+                </span>
+              )}
+            </div>
+            <div className="signal-heat-badge" style={{
+              color: heatFg(heat), background: heatBg(heat), borderColor: heatBd(heat),
+            }}>{heat.toUpperCase()}</div>
+            <div className="signal-time">{timeAgo(s.detected_at)}</div>
+          </div>
+        )
+      })}
     </div>
   )
 }

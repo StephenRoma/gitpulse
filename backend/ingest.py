@@ -71,10 +71,9 @@ async def ingest_account(account_id: int) -> dict:
             try:
                 starred = user.get_starred()
                 for repo in starred:
-                    if repo.starred_at and repo.starred_at < cutoff:
+                    starred_at = getattr(repo, 'starred_at', None)
+                    if starred_at and starred_at < cutoff:
                         break
-                    if repo.starred_at is None:
-                        continue
                     topics = repo.get_topics()
                     sig_score = score_repo(repo.name, repo.description, topics, repo.language)
                     await db.save_signal(

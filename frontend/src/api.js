@@ -29,6 +29,10 @@ export const api = {
   getBriefing: (id) => req(`/accounts/${id}/briefing`),
   generateBriefing: (id) => req(`/accounts/${id}/briefing/generate`, { method: 'POST' }),
 
+  importOrgMembers: (id) => req(`/accounts/${id}/import-org-members`, { method: 'POST' }),
+
+  chat: (id, message, history = []) => req(`/accounts/${id}/chat`, { method: 'POST', body: { message, history } }),
+
   syncAccount: (id) => req(`/accounts/${id}/sync`, { method: 'POST' }),
   getSyncStatus: (id) => req(`/accounts/${id}/sync-status`),
   syncAll: () => req('/sync-all', { method: 'POST' }),

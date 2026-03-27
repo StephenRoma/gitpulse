@@ -1,18 +1,19 @@
 @echo off
-REM GitPulse startup script for Windows
+REM GitPulse — single-terminal startup
+REM Backend runs silently (log → backend\backend.log); only Vite is shown here.
 
 SET SCRIPT_DIR=%~dp0
 
 REM ── Check .env ─────────────────────────────────────────────────────
 IF NOT EXIST "%SCRIPT_DIR%backend\.env" (
-    echo [ERROR] No .env found in backend\
-    echo Copy backend\.env.example to backend\.env and fill in your keys.
+    echo [ERROR] backend\.env not found.
+    echo Copy backend\.env.example to backend\.env and fill in your API keys.
     pause
     exit /b 1
 )
 
-REM ── Backend ────────────────────────────────────────────────────────
-cd "%SCRIPT_DIR%backend"
+REM ── Backend venv + deps ────────────────────────────────────────────
+cd /d "%SCRIPT_DIR%backend"
 
 IF NOT EXIST "venv\" (
     echo Setting up Python virtual environment...
@@ -20,24 +21,28 @@ IF NOT EXIST "venv\" (
 )
 
 call venv\Scripts\activate.bat
-pip install -q -r requirements.txt
 
-echo Starting FastAPI backend...
-start "GitPulse Backend" cmd /k "venv\Scripts\activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+IF NOT EXIST "venv\Lib\site-packages\fastapi" (
+    echo Installing Python dependencies...
+    pip install -q -r requirements.txt
+)
+
+REM ── Start backend silently (log → backend\backend.log) ────────────
+echo Starting backend on http://localhost:8000
+start /min "GitPulse Backend" cmd /c "cd /d "%SCRIPT_DIR%backend" && call venv\Scripts\activate.bat && python -m uvicorn main:app --host 127.0.0.1 --port 8000 > backend.log 2>&1"
 
 REM ── Frontend ───────────────────────────────────────────────────────
-cd "%SCRIPT_DIR%frontend"
+cd /d "%SCRIPT_DIR%frontend"
 
-echo Installing frontend dependencies...
-call npm install --silent
-
-echo Starting Vite dev server...
-start "GitPulse Frontend" cmd /k "npm run dev"
+IF NOT EXIST "node_modules\" (
+    echo Installing frontend dependencies...
+    call npm install --silent
+)
 
 echo.
-echo GitPulse is starting up!
-echo Dashboard -^> http://localhost:5173
-echo API docs  -^> http://localhost:8000/docs
+echo  GitPulse  →  http://localhost:5173
+echo  API docs  →  http://localhost:8000/docs
+echo  Backend log  →  backend\backend.log
 echo.
-echo Close the terminal windows to stop.
-pause
+
+npm run dev
