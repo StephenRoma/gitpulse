@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +50,25 @@ class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
 
+class UpdateAccountRequest(BaseModel):
+    name: Optional[str] = None
+    github_org: Optional[str] = None
+    account_type: Optional[str] = None
+
+class CreateTeamRequest(BaseModel):
+    name: str
+    color: str = '#1A2158'
+
+class UpdateTeamRequest(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+class AssignTeamRequest(BaseModel):
+    team_id: Optional[int] = None
+
+class TagSignalRequest(BaseModel):
+    theme: str
+
 # ── Accounts ─────────────────────────────────────────────────────────────────
 @app.get("/accounts")
 async def list_accounts():
@@ -76,6 +96,15 @@ async def get_account(account_id: int):
         raise HTTPException(status_code=404, detail="Account not found")
     return account
 
+@app.patch("/accounts/{account_id}")
+async def update_account(account_id: int, req: UpdateAccountRequest):
+    account = await db.update_account(
+        account_id, name=req.name, github_org=req.github_org, account_type=req.account_type
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return account
+
 # ── Engineers ─────────────────────────────────────────────────────────────────
 @app.get("/accounts/{account_id}/engineers")
 async def get_engineers(account_id: int):
@@ -93,10 +122,174 @@ async def remove_engineer(engineer_id: int):
     await db.remove_engineer(engineer_id)
     return {"message": "Engineer removed"}
 
+@app.patch("/engineers/{engineer_id}")
+async def update_engineer(engineer_id: int, req: AssignTeamRequest):
+    await db.assign_engineer_team(engineer_id, req.team_id)
+    return {"message": "Engineer updated"}
+
+# ── Teams ───────────────────────────────────────────────────────────────────
+@app.get("/accounts/{account_id}/teams")
+async def get_teams(account_id: int):
+    return await db.get_teams(account_id)
+
+@app.post("/accounts/{account_id}/teams")
+async def create_team(account_id: int, req: CreateTeamRequest):
+    return await db.create_team(account_id, req.name, req.color)
+
+@app.patch("/teams/{team_id}")
+async def update_team(team_id: int, req: UpdateTeamRequest):
+    await db.update_team(team_id, req.name, req.color)
+    return {"message": "Team updated"}
+
+@app.delete("/teams/{team_id}")
+async def delete_team(team_id: int):
+    await db.delete_team(team_id)
+    return {"message": "Team deleted"}
+
 # ── Signals ───────────────────────────────────────────────────────────────────
 @app.get("/accounts/{account_id}/signals")
-async def get_signals(account_id: int, limit: int = 50):
+async def get_signals(account_id: int, limit: int = 300):
     return await db.get_signals(account_id, limit)
+@app.get("/accounts/{account_id}/signal-tags")
+async def get_signal_tags(account_id: int):
+    return await db.get_signal_tags_map(account_id)
+
+@app.post("/signals/{signal_id}/tags")
+async def tag_signal(signal_id: int, req: TagSignalRequest):
+    # Look up account_id from the signal
+    import aiosqlite
+    from pathlib import Path
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("SELECT account_id FROM signals WHERE id = ?", (signal_id,)) as cursor:
+            row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    await db.tag_signal(signal_id, row["account_id"], req.theme)
+    return {"message": "Tagged"}
+
+@app.delete("/signals/{signal_id}/tags/{theme}")
+async def untag_signal(signal_id: int, theme: str):
+    await db.untag_signal(signal_id, theme)
+    return {"message": "Untagged"}
+# ── Reports ────────────────────────────────────────────────────────────────
+THEME_LABELS = {
+    "modernization":   "Modernization",
+    "cloud_migration": "Cloud Migration",
+    "ai_adoption":     "AI / ML Adoption",
+    "security":        "Security & Compliance",
+    "platform_eng":    "Platform Engineering",
+    "vendor_eval":     "Vendor Evaluation",
+    "tech_debt":       "Tech Debt",
+    "performance":     "Performance",
+    "devex":           "Developer Experience",
+}
+
+@app.get("/accounts/{account_id}/report")
+async def get_report(account_id: int):
+    report = await db.get_latest_report(account_id)
+    if not report:
+        return None
+    try:
+        report["content"] = json.loads(report["content"])
+    except Exception:
+        pass
+    return report
+
+@app.post("/accounts/{account_id}/report/generate")
+async def generate_report(account_id: int):
+    account = await db.get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    tagged_signals = await db.get_tagged_signals(account_id)
+    if not tagged_signals:
+        raise HTTPException(status_code=400, detail="No tagged signals. Tag signals in the feed first.")
+
+    # Group signals by theme
+    theme_groups: dict[str, list] = {}
+    for sig in tagged_signals:
+        for theme in sig.get("themes", []):
+            if theme not in theme_groups:
+                theme_groups[theme] = []
+            theme_groups[theme].append(sig)
+
+    # Fetch latest briefing for context
+    briefing_row = await db.get_latest_briefing(account_id)
+    briefing_content = {}
+    if briefing_row:
+        try:
+            briefing_content = json.loads(briefing_row["content"]) if isinstance(briefing_row["content"], str) else briefing_row["content"]
+        except Exception:
+            pass
+
+    # Build a single prompt for all themes
+    theme_blocks = []
+    for theme, sigs in theme_groups.items():
+        label = THEME_LABELS.get(theme, theme)
+        lines = []
+        for s in sigs[:10]:
+            raw = s.get("raw_data") or {}
+            if isinstance(raw, str):
+                try: raw = json.loads(raw)
+                except: raw = {}
+            desc = (s.get("repo_description") or "")[:80]
+            lines.append(f"  - [{s['signal_type'].upper()}] {s.get('engineer_username','')} → {s['repo_name']}: {desc}")
+        theme_blocks.append(f"THEME: {label}\n" + "\n".join(lines))
+
+    prompt = (
+        f"You are writing a sales intelligence report for Relevantz about {account['name']}.\n"
+        f"Account type: {account.get('account_type','prospect')} | Signal score: {account.get('signal_score',0)}/100\n\n"
+        f"The sales team has tagged GitHub signals into strategic themes. "
+        f"For each theme below, write a 2-3 sentence narrative that:\n"
+        f"1. States what pattern the signals reveal\n"
+        f"2. Explains the business implication or pain point\n"
+        f"3. Suggests a specific Relevantz angle to open a conversation\n\n"
+        + "\n\n".join(theme_blocks)
+        + "\n\nReturn a JSON array (no markdown fences) with one object per theme:\n"
+        "[{\"theme\": \"theme_key\", \"narrative\": \"...\"}]"
+    )
+
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=key)
+    response = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    raw_text = response.content[0].text.strip()
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```")[1]
+        if raw_text.startswith("json"): raw_text = raw_text[4:]
+    narratives = json.loads(raw_text.strip())
+    narrative_map = {n["theme"]: n["narrative"] for n in narratives}
+
+    # Build report JSON
+    themes_out = []
+    for theme, sigs in theme_groups.items():
+        themes_out.append({
+            "theme": theme,
+            "label": THEME_LABELS.get(theme, theme),
+            "narrative": narrative_map.get(theme, ""),
+            "signals": sigs[:20],
+        })
+
+    report_content = {
+        "account": {
+            "name": account["name"],
+            "github_org": account.get("github_org", ""),
+            "account_type": account.get("account_type", "prospect"),
+            "signal_score": account.get("signal_score", 0),
+        },
+        "briefing": briefing_content,
+        "themes": themes_out,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+    await db.save_report(account_id, json.dumps(report_content))
+    return report_content
 
 # ── Briefings ─────────────────────────────────────────────────────────────────
 @app.get("/accounts/{account_id}/briefing")
@@ -207,8 +400,25 @@ async def import_org_members(account_id: int):
         if login not in existing:
             await db.add_engineer_to_account(account_id, login)
             added += 1
+            # Enrich company from GitHub profile
+            try:
+                user_obj = g.get_user(login)
+                company_raw = user_obj.company or ''
+                company = company_raw.lstrip('@').strip() or None
+                if company:
+                    await db.upsert_engineer(account_id, login, company=company)
+            except Exception:
+                pass
+    # Suggest teams based on distinct company values not yet mapped to a team
+    all_engineers = await db.get_engineers(account_id)
+    existing_teams = {t['name'].lower() for t in await db.get_teams(account_id)}
+    companies = set()
+    for eng in all_engineers:
+        c = eng.get('company')
+        if c and c.lower() not in existing_teams:
+            companies.add(c)
     skipped = len(logins) - added
-    return {"added": added, "skipped": skipped, "total": len(logins)}
+    return {"added": added, "skipped": skipped, "total": len(logins), "suggested_teams": sorted(companies)}
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 @app.post("/accounts/{account_id}/chat")
@@ -219,11 +429,11 @@ async def chat_with_signals(account_id: int, req: ChatRequest):
     key = os.getenv("ANTHROPIC_API_KEY")
     if not key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
-    signals = await db.get_signals(account_id, limit=80)
+    signals = await db.get_signals(account_id, limit=200)
     engineers = await db.get_engineers(account_id)
     briefing_row = await db.get_latest_briefing(account_id)
     signal_lines = []
-    for s in signals[:60]:
+    for s in signals[:100]:
         lang = s.get("repo_language", "") or ""
         desc = (s.get("repo_description", "") or "")[:80]
         signal_lines.append(f"- [{s['signal_type'].upper()}] {s.get('engineer_username','')} → {s['repo_name']} ({lang}): {desc}")

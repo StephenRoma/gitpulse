@@ -14,7 +14,7 @@ function initials(name) {
   return name.slice(0, 2).toUpperCase()
 }
 
-export default function AccountSidebar({ accounts, selectedId, onSelect, onDelete, onAdd, filter, onFilter }) {
+export default function AccountSidebar({ accounts, selectedId, onSelect, onDelete, onEdit, onAdd, filter, onFilter }) {
   const [deletingId, setDeletingId] = useState(null)
 
   async function handleDelete(e, id) {
@@ -118,13 +118,22 @@ export default function AccountSidebar({ accounts, selectedId, onSelect, onDelet
                     }} />
                   </div>
                 </div>
-                <div style={{ marginLeft: 4, flexShrink: 0 }}>
+                <div style={{ marginLeft: 4, flexShrink: 0, display: 'flex', gap: 3, alignItems: 'center' }}>
                   {deletingId === acc.id
                     ? <Spinner size={12} />
-                    : <button className="acct-delete-btn"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer',
-                          color: 'var(--text-faint)', padding: '2px 4px', borderRadius: 4, opacity: 0, fontSize: 11 }}
-                        onClick={e => handleDelete(e, acc.id)}>x</button>
+                    : (
+                      <>
+                        <button className="acct-delete-btn"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer',
+                            color: 'var(--text-faint)', padding: '2px 4px', borderRadius: 4, opacity: 0, fontSize: 11 }}
+                          title="Edit account"
+                          onClick={e => { e.stopPropagation(); onEdit && onEdit(acc) }}>&#9998;</button>
+                        <button className="acct-delete-btn"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer',
+                            color: 'var(--text-faint)', padding: '2px 4px', borderRadius: 4, opacity: 0, fontSize: 11 }}
+                          onClick={e => handleDelete(e, acc.id)}>x</button>
+                      </>
+                    )
                   }
                 </div>
               </div>

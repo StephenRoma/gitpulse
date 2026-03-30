@@ -69,7 +69,7 @@ function renderInline(text) {
   })
 }
 
-export default function RightPanel({ account, signals = [], engineers = [], onOutreach }) {
+export default function RightPanel({ account, signals = [], engineers = [], teams = [], onOutreach }) {
   const [messages, setMessages] = useState([{ role: 'assistant', content: WELCOME }])
   const [input, setInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
@@ -142,6 +142,7 @@ export default function RightPanel({ account, signals = [], engineers = [], onOu
               const h = sigHeat(s)
               return h === 'hot' ? 'hot' : best === 'hot' ? 'hot' : h === 'warm' ? 'warm' : best
             }, 'cool')
+            const team = teams.find(t => t.id === eng.team_id)
             return (
               <div key={eng.id} style={{
                 display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5,
@@ -158,6 +159,14 @@ export default function RightPanel({ account, signals = [], engineers = [], onOu
                   fontSize: 10, color: heatFg(heat), fontFamily: 'var(--mono)',
                   flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                 }}>{eng.github_username}</span>
+                {team && (
+                  <span style={{
+                    fontSize: 8, padding: '1px 5px', borderRadius: 3,
+                    background: team.color + '22', color: team.color,
+                    border: `1px solid ${team.color}44`, fontFamily: 'var(--mono)',
+                    whiteSpace: 'nowrap', maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis'
+                  }}>{team.name}</span>
+                )}
               </div>
             )
           })}

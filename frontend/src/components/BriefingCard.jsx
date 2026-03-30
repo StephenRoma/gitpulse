@@ -58,6 +58,29 @@ export default function BriefingCard({ briefing, loading, onRegenerate, onOutrea
                   ))}
                 </div>
               )}
+              {content.prescient_calls?.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginBottom: 7 }}>PRESCIENT CALLS</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {content.prescient_calls.map((pc, i) => {
+                      const confColor = pc.confidence === 'high' ? { fg: '#C8005A', bg: '#FFF0F5', bd: '#FBCFE8' }
+                                      : pc.confidence === 'medium' ? { fg: '#D97706', bg: '#FFFBEB', bd: '#FDE68A' }
+                                      : { fg: '#2563EB', bg: '#EFF6FF', bd: '#BFDBFE' }
+                      return (
+                        <div key={i} style={{ padding: '8px 10px', borderRadius: 6, border: `1px solid ${confColor.bd}`, background: confColor.bg }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: confColor.fg, color: '#fff', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', marginTop: 1 }}>{(pc.confidence || 'low').toUpperCase()}</span>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--navy)', lineHeight: 1.4 }}>{pc.call}</div>
+                              {pc.evidence && <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.4 }}>{pc.evidence}</div>}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {onOutreach && (
                 <div style={{ marginTop: 12 }}>
                   <button onClick={onOutreach} style={{

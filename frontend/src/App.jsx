@@ -7,7 +7,9 @@ import BriefingCard from './components/BriefingCard'
 import SignalFeed from './components/SignalFeed'
 import RightPanel from './components/RightPanel'
 import AddAccountDialog from './components/AddAccountDialog'
+import EditAccountDialog from './components/EditAccountDialog'
 import OutreachModal from './components/OutreachModal'
+import ReportModal from './components/ReportModal'
 
 const PALETTE = [
   '#C8005A','#1A6B9A','#2D6A4F','#6D3A9C',
@@ -52,6 +54,16 @@ export default function App() {
   const [importingOrg, setImportingOrg]       = useState(false)
   const [sidebarWidth, setSidebarWidth]       = useState(272)
   const [rightWidth, setRightWidth]           = useState(300)
+  const [editOpen, setEditOpen]               = useState(false)
+  const [editAccount, setEditAccount]         = useState(null)
+  const [teams, setTeams]                     = useState([])
+  const [addTeamOpen, setAddTeamOpen]         = useState(false)
+  const [newTeamName, setNewTeamName]         = useState('')
+  const [newTeamColor, setNewTeamColor]       = useState('#1A2158')
+  const [signalTags, setSignalTags]           = useState({})  // {signal_id: [theme, ...]}
+  const [reportOpen, setReportOpen]           = useState(false)
+  const [reportData, setReportData]           = useState(null)
+  const [reportLoading, setReportLoading]     = useState(false)
 
   function startResizeSidebar(e) {
     e.preventDefault()
@@ -69,15 +81,31 @@ export default function App() {
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
   }
 
-  useEffect(() => { api.getAccounts().then(setAccounts).catch(console.error) }, [])
+  useEffect(() => {
+    api.getAccounts().then(accts => {
+      setAccounts(accts)
+      if (accts.length > 0) {
+        const saved = parseInt(localStorage.getItem('gp_selected_id'))
+        const match = accts.find(a => a.id === saved)
+        setSelectedId(match ? match.id : accts[0].id)
+      }
+    }).catch(console.error)
+  }, [])
 
   const selectedAccount = accounts.find(a => a.id === selectedId) || null
 
+  // Persist selected account across refreshes
   useEffect(() => {
-    if (!selectedId) { setSignals([]); setBriefing(null); setEngineers([]); return }
+    if (selectedId) localStorage.setItem('gp_selected_id', selectedId)
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!selectedId) { setSignals([]); setBriefing(null); setEngineers([]); setTeams([]); return }
     api.getSignals(selectedId).then(setSignals).catch(() => setSignals([]))
     api.getBriefing(selectedId).then(setBriefing).catch(() => setBriefing(null))
     api.getEngineers(selectedId).then(setEngineers).catch(() => setEngineers([]))
+    api.getTeams(selectedId).then(setTeams).catch(() => setTeams([]))
+    api.getSignalTags(selectedId).then(setSignalTags).catch(() => setSignalTags({}))
     setActiveTab('signals')
   }, [selectedId])
 
@@ -124,6 +152,72 @@ export default function App() {
     if (selectedId === id) setSelectedId(null)
   }, [selectedId])
 
+  const handleEditAccount = useCallback(async (data) => {
+    const updated = await api.updateAccount(editAccount.id, data)
+    setAccounts(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a))
+    setEditOpen(false)
+    setEditAccount(null)
+  }, [editAccount])
+
+  const handleCreateTeam = useCallback(async () => {
+    if (!selectedId || !newTeamName.trim()) return
+    const team = await api.createTeam(selectedId, { name: newTeamName.trim(), color: newTeamColor })
+    setTeams(prev => [...prev, team])
+    setNewTeamName('')
+    setNewTeamColor('#1A2158')
+    setAddTeamOpen(false)
+  }, [selectedId, newTeamName, newTeamColor])
+
+  const handleDeleteTeam = useCallback(async (teamId) => {
+    await api.deleteTeam(teamId)
+    setTeams(prev => prev.filter(t => t.id !== teamId))
+    setEngineers(prev => prev.map(e => e.team_id === teamId ? { ...e, team_id: null } : e))
+  }, [])
+
+  const handleAssignTeam = useCallback(async (engineerId, teamIdStr) => {
+    const teamId = teamIdStr === '' ? null : parseInt(teamIdStr)
+    await api.assignEngineerTeam(engineerId, teamId)
+    setEngineers(prev => prev.map(e => e.id === engineerId ? { ...e, team_id: teamId } : e))
+  }, [])
+
+  const handleTagSignal = useCallback(async (signalId, theme) => {
+    // Optimistic update
+    setSignalTags(prev => {
+      const existing = prev[signalId] || []
+      if (existing.includes(theme)) return prev
+      return { ...prev, [signalId]: [...existing, theme] }
+    })
+    try { await api.tagSignal(signalId, theme) }
+    catch (e) {
+      // Rollback
+      setSignalTags(prev => ({ ...prev, [signalId]: (prev[signalId] || []).filter(t => t !== theme) }))
+    }
+  }, [])
+
+  const handleUntagSignal = useCallback(async (signalId, theme) => {
+    setSignalTags(prev => ({ ...prev, [signalId]: (prev[signalId] || []).filter(t => t !== theme) }))
+    try { await api.untagSignal(signalId, theme) }
+    catch (e) {
+      // Rollback — re-fetch from server
+      api.getSignalTags(selectedId).then(setSignalTags).catch(() => {})
+    }
+  }, [selectedId])
+
+  const handleGenerateReport = useCallback(async () => {
+    if (!selectedId || reportLoading) return
+    setReportLoading(true)
+    setReportOpen(true)
+    try {
+      const data = await api.generateReport(selectedId)
+      setReportData(data)
+    } catch (e) {
+      window.alert(`Report generation failed: ${e.message}`)
+      setReportOpen(false)
+    } finally {
+      setReportLoading(false)
+    }
+  }, [selectedId, reportLoading])
+
   const handleAddEngineer = useCallback(async (username) => {
     if (!selectedId) return
     const eng = await api.addEngineer(selectedId, username)
@@ -142,6 +236,11 @@ export default function App() {
       const result = await api.importOrgMembers(selectedId)
       const engs = await api.getEngineers(selectedId)
       setEngineers(engs)
+      // If backend suggests teams from company data, prompt user
+      if (result.suggested_teams?.length > 0) {
+        const msg = `Imported ${result.added} contributors.\n\nDetected companies: ${result.suggested_teams.join(', ')}\n\nCreate teams from these? (Go to Engineers tab to manage teams)`
+        window.alert(msg)
+      }
       // Auto-sync now that we have contributors
       setSyncing(true)
       await api.syncAccount(selectedId)
@@ -150,14 +249,17 @@ export default function App() {
         const status = await api.getSyncStatus(selectedId)
         if (status.status === 'done' || status.status === 'error') break
       }
-      const [accts, sigs, brf, freshEngs] = await Promise.all([
+      const [accts, sigs, brf, freshEngs, freshTeams] = await Promise.all([
         api.getAccounts(),
         api.getSignals(selectedId),
         api.getBriefing(selectedId).catch(() => null),
         api.getEngineers(selectedId),
+        api.getTeams(selectedId),
       ])
-      setAccounts(accts); setSignals(sigs); setBriefing(brf); setEngineers(freshEngs)
-      window.alert(`Imported ${result.added} contributors (${result.skipped} already tracked) — sync complete`)
+      setAccounts(accts); setSignals(sigs); setBriefing(brf); setEngineers(freshEngs); setTeams(freshTeams)
+      if (!result.suggested_teams?.length) {
+        window.alert(`Imported ${result.added} contributors (${result.skipped} already tracked) — sync complete`)
+      }
     } catch (e) {
       window.alert(`Import failed: ${e.message}`)
     } finally {
@@ -184,6 +286,7 @@ export default function App() {
           <AccountSidebar
             accounts={filteredAccounts} selectedId={selectedId}
             onSelect={setSelectedId} onDelete={handleDeleteAccount}
+            onEdit={(acc) => { setEditAccount(acc); setEditOpen(true) }}
             onAdd={() => setAddOpen(true)} filter={filter} onFilter={setFilter}
           />
         </div>
@@ -236,6 +339,19 @@ export default function App() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => { setEditAccount(selectedAccount); setEditOpen(true) }} style={{
+                      padding: '7px 14px', borderRadius: 8,
+                      border: '1px solid var(--border)', background: 'var(--surface-2)',
+                      color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'var(--mono)',
+                      cursor: 'pointer'
+                    }}>&#9998; Edit</button>
+                    <button onClick={handleGenerateReport} disabled={reportLoading} style={{
+                      padding: '7px 14px', borderRadius: 8,
+                      border: '1px solid var(--border)', background: 'var(--surface-2)',
+                      color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'var(--mono)',
+                      cursor: reportLoading ? 'not-allowed' : 'pointer',
+                      opacity: reportLoading ? 0.6 : 1,
+                    }}>{reportLoading ? 'Generating...' : '&#128196; Report'}</button>
                     <button onClick={() => setOutreachOpen(true)} style={{
                       padding: '7px 16px', borderRadius: 8, border: 'none',
                       background: 'var(--magenta)', color: '#fff', fontSize: 12,
@@ -292,7 +408,8 @@ export default function App() {
               </div>
 
               <div className="tab-content">
-                {activeTab === 'signals' && <SignalFeed signals={signals} />}
+                {activeTab === 'signals' && <SignalFeed signals={signals} engineers={engineers}
+                  signalTags={signalTags} onTagSignal={handleTagSignal} onUntagSignal={handleUntagSignal} />}
 
                 {activeTab === 'stack' && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -310,35 +427,159 @@ export default function App() {
 
                 {activeTab === 'engineers' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {engineers.length === 0
-                      ? <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No engineers tracked yet.</div>
-                      : engineers.map(eng => {
+                    {/* Team management header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', letterSpacing: '0.08em' }}>
+                        TEAMS ({teams.length})
+                      </span>
+                      {!addTeamOpen && (
+                        <button onClick={() => setAddTeamOpen(true)} style={{
+                          fontSize: 10, fontFamily: 'var(--mono)', border: '1px dashed var(--border)',
+                          borderRadius: 6, padding: '3px 10px', background: 'transparent',
+                          color: 'var(--text-muted)', cursor: 'pointer'
+                        }}>+ Add Team</button>
+                      )}
+                    </div>
+
+                    {/* New team inline form */}
+                    {addTeamOpen && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 10px',
+                        borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', marginBottom: 4 }}>
+                        <input value={newTeamName} onChange={e => setNewTeamName(e.target.value)}
+                          placeholder="Team name (e.g. Capital Markets)"
+                          onKeyDown={e => { if (e.key === 'Enter') handleCreateTeam(); if (e.key === 'Escape') setAddTeamOpen(false) }}
+                          style={{ flex: 1, fontSize: 11, fontFamily: 'var(--mono)', border: '1px solid var(--border)',
+                            borderRadius: 4, padding: '4px 8px', background: 'var(--bg)', color: 'var(--navy)' }}
+                          autoFocus
+                        />
+                        <input type="color" value={newTeamColor} onChange={e => setNewTeamColor(e.target.value)}
+                          title="Team color"
+                          style={{ width: 28, height: 28, border: '1px solid var(--border)', borderRadius: 4,
+                            padding: 2, cursor: 'pointer', background: 'none' }}
+                        />
+                        <button onClick={handleCreateTeam} style={{
+                          fontSize: 10, fontFamily: 'var(--mono)', border: 'none', borderRadius: 4,
+                          padding: '4px 10px', background: 'var(--navy)', color: '#fff', cursor: 'pointer'
+                        }}>Save</button>
+                        <button onClick={() => { setAddTeamOpen(false); setNewTeamName('') }} style={{
+                          fontSize: 10, fontFamily: 'var(--mono)', border: '1px solid var(--border)',
+                          borderRadius: 4, padding: '4px 8px', background: 'transparent',
+                          color: 'var(--text-muted)', cursor: 'pointer'
+                        }}>Cancel</button>
+                      </div>
+                    )}
+
+                    {/* Engineers grouped by team */}
+                    {(() => {
+                      const teamMap = Object.fromEntries(teams.map(t => [t.id, t]))
+                      const grouped = {}
+                      const unassigned = []
+                      for (const eng of engineers) {
+                        if (eng.team_id && teamMap[eng.team_id]) {
+                          if (!grouped[eng.team_id]) grouped[eng.team_id] = []
+                          grouped[eng.team_id].push(eng)
+                        } else {
+                          unassigned.push(eng)
+                        }
+                      }
+
+                      const teamDropdown = (eng) => (
+                        <select value={eng.team_id || ''}
+                          onChange={e => handleAssignTeam(eng.id, e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                          style={{ fontSize: 9, fontFamily: 'var(--mono)', border: '1px solid var(--border)',
+                            borderRadius: 4, padding: '2px 4px', background: 'var(--surface)',
+                            color: 'var(--text-muted)', cursor: 'pointer', maxWidth: 110 }}
+                        >
+                          <option value="">No Team</option>
+                          {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      )
+
+                      const engRow = (eng) => {
                         const engSigs = signals.filter(s => s.actor_login === eng.github_username)
                         const heat = engSigs.length > 0 ? sigHeat(engSigs[0]) : 'cool'
                         return (
                           <div key={eng.id} style={{
-                            display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px',
-                            borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)'
+                            display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+                            borderRadius: 7, background: 'var(--surface)', border: '1px solid var(--border)'
                           }}>
                             <div style={{
-                              width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                              width: 28, height: 28, borderRadius: 7, flexShrink: 0,
                               background: heatBg(heat), border: `1px solid ${heatBd(heat)}`,
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 10, fontWeight: 700, color: heatFg(heat), fontFamily: 'var(--mono)'
+                              fontSize: 9, fontWeight: 700, color: heatFg(heat), fontFamily: 'var(--mono)'
                             }}>{eng.github_username.slice(0, 2).toUpperCase()}</div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: 12, color: 'var(--navy)', fontFamily: 'var(--mono)' }}>{eng.github_username}</div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>
-                                {engSigs.length} signal{engSigs.length !== 1 ? 's' : ''}
-                              </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 11, color: 'var(--navy)', fontFamily: 'var(--mono)' }}>{eng.github_username}</div>
+                              {eng.company && (
+                                <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{eng.company}</div>
+                              )}
                             </div>
+                            {teamDropdown(eng)}
                             <button onClick={() => handleRemoveEngineer(eng.id)} style={{
-                              background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', fontSize: 14
+                              background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', fontSize: 13, flexShrink: 0
                             }}>&times;</button>
                           </div>
                         )
-                      })
-                    }
+                      }
+
+                      return (
+                        <>
+                          {teams.map(team => (
+                            <div key={team.id} style={{ marginBottom: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 8px',
+                                borderRadius: '7px 7px 0 0', background: team.color + '18',
+                                border: `1px solid ${team.color}40`, borderBottom: 'none' }}>
+                                <div style={{ width: 8, height: 8, borderRadius: '50%', background: team.color, flexShrink: 0 }} />
+                                <span style={{ flex: 1, fontSize: 10, fontWeight: 700, color: team.color,
+                                  fontFamily: 'var(--display)', letterSpacing: '0.05em' }}>
+                                  {team.name.toUpperCase()}
+                                </span>
+                                <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>
+                                  {(grouped[team.id] || []).length} engineers
+                                </span>
+                                <button onClick={() => handleDeleteTeam(team.id)}
+                                  title="Delete team (engineers become unassigned)"
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                    color: 'var(--text-faint)', fontSize: 11, padding: '0 2px' }}>&times;</button>
+                              </div>
+                              <div style={{ border: `1px solid ${team.color}40`, borderTop: 'none',
+                                borderRadius: '0 0 7px 7px', overflow: 'hidden' }}>
+                                {(grouped[team.id] || []).length === 0
+                                  ? <div style={{ padding: '8px 12px', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>No engineers assigned yet</div>
+                                  : (grouped[team.id] || []).map(engRow)
+                                }
+                              </div>
+                            </div>
+                          ))}
+
+                          {/* Unassigned group */}
+                          {unassigned.length > 0 && (
+                            <div style={{ marginBottom: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 8px',
+                                borderRadius: '7px 7px 0 0', background: 'var(--bg)',
+                                border: '1px solid var(--border)', borderBottom: 'none' }}>
+                                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)',
+                                  fontFamily: 'var(--display)', letterSpacing: '0.05em', flex: 1 }}>UNASSIGNED</span>
+                                <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>
+                                  {unassigned.length} engineers
+                                </span>
+                              </div>
+                              <div style={{ border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 7px 7px', overflow: 'hidden' }}>
+                                {unassigned.map(engRow)}
+                              </div>
+                            </div>
+                          )}
+
+                          {engineers.length === 0 && (
+                            <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No engineers tracked yet.</div>
+                          )}
+                        </>
+                      )
+                    })()}
+
                     <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                       <button onClick={() => {
                         const u = window.prompt('GitHub username to track:')
@@ -364,12 +605,19 @@ export default function App() {
         <div className="resize-handle" onMouseDown={startResizeRight} />
         <div style={{ width: rightWidth, flexShrink: 0, display: 'flex' }}>
           <RightPanel account={selectedAccount} signals={signals}
-            engineers={engineers} onOutreach={() => setOutreachOpen(true)} />
+            engineers={engineers} teams={teams} onOutreach={() => setOutreachOpen(true)} />
         </div>
       </div>
       <AddAccountDialog isOpen={addOpen} onClose={() => setAddOpen(false)} onSubmit={handleAddAccount} />
+      <EditAccountDialog isOpen={editOpen} onClose={() => { setEditOpen(false); setEditAccount(null) }}
+        account={editAccount} onSubmit={handleEditAccount} />
       <OutreachModal isOpen={outreachOpen} onClose={() => setOutreachOpen(false)}
         account={selectedAccount} briefing={briefing} />
+      <ReportModal
+        isOpen={reportOpen} onClose={() => setReportOpen(false)}
+        report={reportData} loading={reportLoading}
+        account={selectedAccount}
+      />
     </div>
   )
 }

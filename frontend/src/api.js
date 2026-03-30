@@ -17,14 +17,27 @@ async function req(path, opts = {}) {
 export const api = {
   getAccounts: () => req('/accounts'),
   createAccount: (data) => req('/accounts', { method: 'POST', body: data }),
+  updateAccount: (id, data) => req(`/accounts/${id}`, { method: 'PATCH', body: data }),
   deleteAccount: (id) => req(`/accounts/${id}`, { method: 'DELETE' }),
   getAccount: (id) => req(`/accounts/${id}`),
 
   getEngineers: (id) => req(`/accounts/${id}/engineers`),
   addEngineer: (id, username) => req(`/accounts/${id}/engineers`, { method: 'POST', body: { username } }),
   removeEngineer: (engineerId) => req(`/engineers/${engineerId}`, { method: 'DELETE' }),
+  assignEngineerTeam: (engineerId, teamId) => req(`/engineers/${engineerId}`, { method: 'PATCH', body: { team_id: teamId } }),
 
-  getSignals: (id, limit = 50) => req(`/accounts/${id}/signals?limit=${limit}`),
+  getTeams: (id) => req(`/accounts/${id}/teams`),
+  createTeam: (id, data) => req(`/accounts/${id}/teams`, { method: 'POST', body: data }),
+  updateTeam: (teamId, data) => req(`/teams/${teamId}`, { method: 'PATCH', body: data }),
+  deleteTeam: (teamId) => req(`/teams/${teamId}`, { method: 'DELETE' }),
+
+  getSignals: (id, limit = 300) => req(`/accounts/${id}/signals?limit=${limit}`),
+  getSignalTags: (id) => req(`/accounts/${id}/signal-tags`),
+  tagSignal: (signalId, theme) => req(`/signals/${signalId}/tags`, { method: 'POST', body: { theme } }),
+  untagSignal: (signalId, theme) => req(`/signals/${signalId}/tags/${theme}`, { method: 'DELETE' }),
+
+  getReport: (id) => req(`/accounts/${id}/report`),
+  generateReport: (id) => req(`/accounts/${id}/report/generate`, { method: 'POST' }),
 
   getBriefing: (id) => req(`/accounts/${id}/briefing`),
   generateBriefing: (id) => req(`/accounts/${id}/briefing/generate`, { method: 'POST' }),
