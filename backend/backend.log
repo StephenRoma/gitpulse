@@ -19,3 +19,9 @@ INFO:     127.0.0.1:55224 - "GET /accounts/16/engineers HTTP/1.1" 200 OK
 INFO:     127.0.0.1:55225 - "GET /accounts/16/teams HTTP/1.1" 200 OK
 INFO:     127.0.0.1:55223 - "GET /accounts/16/briefing HTTP/1.1" 200 OK
 INFO:     127.0.0.1:55222 - "GET /accounts/16/signals?limit=300 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64741 - "GET /accounts/16/briefing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64745 - "GET /accounts/16/teams HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64746 - "GET /accounts/16/signal-tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64742 - "GET /accounts/16/engineers HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64738 - "GET /accounts/16/signals?limit=300 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60583 - "GET /accounts HTTP/1.1" 200 OK

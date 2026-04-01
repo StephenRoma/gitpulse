@@ -4,3 +4,11 @@ INFO:     Started reloader process [14940] using WatchFiles
 INFO:     Started server process [22100]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'database.py', 'ingest.py', 'main.py', 'brief.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [22100]
+INFO:     Started server process [27280]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
