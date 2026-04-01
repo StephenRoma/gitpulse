@@ -23,6 +23,25 @@ const SIGNAL_TYPE_LABELS = {
   hn_mention:    'HN Mention',
 }
 
+const CERTAINTY_STYLES = {
+  confirmed:  { fg: '#166534', bg: '#F0FDF4', bd: '#BBF7D0', label: 'CONFIRMED' },
+  active:     { fg: '#0369A1', bg: '#EFF6FF', bd: '#BFDBFE', label: 'ACTIVE' },
+  evaluating: { fg: '#92400E', bg: '#FFFBEB', bd: '#FDE68A', label: 'EVALUATING' },
+}
+const CERTAINTY_RANK = { confirmed: 0, active: 1, evaluating: 2 }
+
+function certaintyBadge(certainty) {
+  const c = CERTAINTY_STYLES[certainty] || CERTAINTY_STYLES.evaluating
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 700, padding: '2px 5px', borderRadius: 3,
+      background: c.bg, color: c.fg, border: `1px solid ${c.bd}`,
+      fontFamily: 'var(--mono)', letterSpacing: '0.06em',
+      whiteSpace: 'nowrap', flexShrink: 0, marginTop: 1,
+    }}>{c.label}</span>
+  )
+}
+
 function confBadge(confidence) {
   const map = {
     high:   { bg: '#C8005A', label: 'HIGH' },
@@ -51,18 +70,47 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
   const acctData  = report?.account  || account || {}
   const score     = acctData.signal_score ?? account?.signal_score ?? 0
 
+  function handleDownload() {
+    const printEl = document.getElementById('gp-report-body')
+    if (!printEl) return
+    const html = printEl.innerHTML
+    const logoSrc = account?.avatar_url
+      || (account?.github_org ? `https://logo.clearbit.com/${account.github_org}.com` : '')
+    const win = window.open('', '_blank', 'width=920,height=800')
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Temporality Report — ${acctData.name || ''}</title>
+      <meta charset="utf-8" />
+      <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        @page { size: A4; margin: 20mm 18mm; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          font-size: 12px;
+          color: #1A2158;
+          background: #fff;
+          line-height: 1.5;
+        }
+        .report-page { max-width: 760px; margin: 0 auto; }
+        .page-break { page-break-after: always; break-after: always; }
+        .theme-section { page-break-inside: avoid; break-inside: avoid; margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid #E5E7EB; }
+        .theme-section:last-child { border-bottom: none; }
+        h1 { font-size: 26px; font-weight: 800; color: #1A2158; }
+        h2 { font-size: 15px; font-weight: 700; }
+        .badge { display: inline-block; font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 3px; font-family: monospace; letter-spacing: 0.06em; white-space: nowrap; }
+        .signal-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-radius: 6px; margin-bottom: 5px; font-size: 11px; }
+        .section-label { font-size: 9px; font-family: monospace; font-weight: 700; letter-spacing: 0.1em; color: #B0BCDA; margin-bottom: 10px; text-transform: uppercase; }
+        .header-border { border-bottom: 2px solid #1A2158; padding-bottom: 18px; margin-bottom: 24px; }
+        .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #E5E7EB; display: flex; justify-content: space-between; }
+        .footer span { font-size: 9px; font-family: monospace; color: #B0BCDA; }
+        img.logo { width: 52px; height: 52px; border-radius: 10px; object-fit: contain; }
+      </style>
+    </head><body><div class="report-page">${html}</div></body></html>`)
+    win.document.close()
+    setTimeout(() => { win.focus(); win.print() }, 600)
+  }
+
   return (
     <>
-      {/* Print styles injected into head via style tag */}
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          #gp-report-print-root { display: block !important; position: static !important; }
-          #gp-report-print-root .report-controls { display: none !important; }
-          #gp-report-print-root .report-body { overflow: visible !important; max-height: none !important; }
-          .theme-section { page-break-inside: avoid; }
-        }
-      `}</style>
 
       {/* Overlay */}
       <div style={{
@@ -86,7 +134,7 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
-                onClick={() => window.print()}
+                onClick={() => handleDownload()}
                 disabled={loading}
                 style={{
                   padding: '6px 16px', borderRadius: 7, border: 'none',
@@ -107,7 +155,7 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
           </div>
 
           {/* Report body */}
-          <div className="report-body" style={{ padding: '36px 44px', overflowY: 'auto', maxHeight: 'calc(100vh - 120px)' }}>
+          <div id="gp-report-body" className="report-body" style={{ padding: '36px 44px', overflowY: 'auto', maxHeight: 'calc(100vh - 120px)' }}>
 
             {loading ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '60px 0', color: 'var(--text-muted)' }}>
@@ -117,28 +165,38 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
             ) : (
               <>
                 {/* ── Header ─────────────────────────────────────────────── */}
-                <div style={{ borderBottom: '2px solid var(--navy)', paddingBottom: 18, marginBottom: 24 }}>
+                <div style={{ borderBottom: '2px solid #1A2158', paddingBottom: 18, marginBottom: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: '#B0BCDA', letterSpacing: '0.12em', marginBottom: 6 }}>
-                        CONFIDENTIAL · RELEVANTZ SALES INTELLIGENCE
-                      </div>
-                      <h1 style={{ fontFamily: 'var(--display)', fontWeight: 800, fontSize: 26, color: 'var(--navy)', margin: 0 }}>
-                        {acctData.name || account?.name}
-                      </h1>
-                      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                        {acctData.github_org && (
-                          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>
-                            github.com/{acctData.github_org}
-                          </span>
-                        )}
-                        <span style={{
-                          fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600,
-                          padding: '1px 7px', borderRadius: 4,
-                          background: acctData.account_type === 'client' ? '#F0FDF4' : '#EFF6FF',
-                          color: acctData.account_type === 'client' ? '#166534' : '#1A6B9A',
-                          border: `1px solid ${acctData.account_type === 'client' ? '#BBF7D0' : '#BFDBFE'}`,
-                        }}>{acctData.account_type === 'client' ? 'Active Client' : 'Pipeline'}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      {(account?.avatar_url || account?.github_org) && (
+                        <img
+                          src={account?.avatar_url || `https://logo.clearbit.com/${account.github_org}.com`}
+                          alt={acctData.name}
+                          style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'contain', flexShrink: 0, background: '#f9fafb' }}
+                          onError={e => { e.target.style.display = 'none' }}
+                        />
+                      )}
+                      <div>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: '#B0BCDA', letterSpacing: '0.12em', marginBottom: 6 }}>
+                          CONFIDENTIAL · RELEVANTZ SALES INTELLIGENCE
+                        </div>
+                        <h1 style={{ fontFamily: 'var(--display)', fontWeight: 800, fontSize: 26, color: '#1A2158', margin: 0 }}>
+                          {acctData.name || account?.name}
+                        </h1>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                          {acctData.github_org && (
+                            <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: '#6B7280' }}>
+                              github.com/{acctData.github_org}
+                            </span>
+                          )}
+                          <span style={{
+                            fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600,
+                            padding: '1px 7px', borderRadius: 4,
+                            background: acctData.account_type === 'client' ? '#F0FDF4' : '#EFF6FF',
+                            color: acctData.account_type === 'client' ? '#166534' : '#1A6B9A',
+                            border: `1px solid ${acctData.account_type === 'client' ? '#BBF7D0' : '#BFDBFE'}`,
+                          }}>{acctData.account_type === 'client' ? 'Active Client' : 'Pipeline'}</span>
+                        </div>
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
@@ -216,6 +274,7 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
                         <div key={i} className="theme-section" style={{
                           marginBottom: 28, paddingBottom: 24,
                           borderBottom: i < themes.length - 1 ? '1px solid #E5E7EB' : 'none',
+                          pageBreakInside: 'avoid', breakInside: 'avoid',
                         }}>
                           {/* Theme header */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -241,12 +300,17 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
                               <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: '#B0BCDA',
                                 letterSpacing: '0.08em', marginBottom: 7 }}>SUPPORTING EVIDENCE</div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                {t.signals.slice(0, 10).map((sig, j) => {
+                                {[...t.signals].sort((a, b) => {
+                                  const ar = typeof a.raw_data === 'string' ? (() => { try { return JSON.parse(a.raw_data) } catch { return {} } })() : (a.raw_data || {})
+                                  const br = typeof b.raw_data === 'string' ? (() => { try { return JSON.parse(b.raw_data) } catch { return {} } })() : (b.raw_data || {})
+                                  return (CERTAINTY_RANK[ar.certainty] ?? 2) - (CERTAINTY_RANK[br.certainty] ?? 2)
+                                }).slice(0, 10).map((sig, j) => {
                                   const raw = typeof sig.raw_data === 'string'
                                     ? (() => { try { return JSON.parse(sig.raw_data) } catch { return {} } })()
                                     : (sig.raw_data || {})
                                   const typeLabel = SIGNAL_TYPE_LABELS[sig.signal_type] || sig.signal_type
                                   const desc = (raw.issue_title || sig.repo_description || '').slice(0, 90)
+                                  const cert = raw.certainty || 'evaluating'
                                   return (
                                     <div key={j} style={{
                                       display: 'flex', alignItems: 'flex-start', gap: 8,
@@ -259,6 +323,7 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
                                         background: themeColor, color: '#fff', fontFamily: 'var(--mono)', flexShrink: 0,
                                         marginTop: 1,
                                       }}>{typeLabel.toUpperCase()}</span>
+                                      {certaintyBadge(cert)}
                                       <div style={{ flex: 1, minWidth: 0 }}>
                                         <span style={{ fontFamily: 'var(--mono)', color: 'var(--navy)' }}>@{sig.engineer_username}</span>
                                         <span style={{ color: 'var(--text-faint)', margin: '0 4px' }}>→</span>
@@ -285,7 +350,7 @@ export default function ReportModal({ isOpen, onClose, report, loading, account 
                 <div style={{ marginTop: 32, paddingTop: 16, borderTop: '1px solid #E5E7EB',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: '#B0BCDA', letterSpacing: '0.08em' }}>
-                    GENERATED BY GITPULSE · RELEVANTZ SALES INTELLIGENCE
+                    GENERATED BY TEMPORALITY · RELEVANTZ SALES INTELLIGENCE
                   </span>
                   <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: '#B0BCDA' }}>{generatedDate}</span>
                 </div>

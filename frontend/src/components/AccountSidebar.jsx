@@ -1,5 +1,6 @@
 ﻿import { Spinner } from '@blueprintjs/core'
 import { useState } from 'react'
+import AccountLogo from './AccountLogo'
 
 const PALETTE = ['#C8005A','#1A6B9A','#2D6A4F','#6D3A9C','#B85042','#D97706','#0369A1','#374060']
 const heatColor  = (s) => s >= 85 ? '#C8005A' : s >= 60 ? '#D97706' : '#2563EB'
@@ -73,12 +74,7 @@ export default function AccountSidebar({ accounts, selectedId, onSelect, onDelet
               style={{ borderLeftColor: selectedId === acc.id ? color : 'transparent' }}
               onClick={() => onSelect(acc.id)}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-                  background: color + '14', border: `1.5px solid ${color}28`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 11, fontWeight: 800, color, fontFamily: 'var(--display)',
-                }}>{initials(acc.name || acc.github_org)}</div>
+                <AccountLogo account={acc} size={36} radius={10} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
                     <span style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 13, color: 'var(--navy)' }}>

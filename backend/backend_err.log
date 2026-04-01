@@ -1,14 +1,9 @@
 INFO:     Will watch for changes in these directories: ['C:\\Users\\Steph\\OneDrive\\Desktop\\gitpulse\\gitpulse\\backend']
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [14940] using WatchFiles
-INFO:     Started server process [22100]
+INFO:     Started reloader process [55324] using WatchFiles
+INFO:     Started server process [18676]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-WARNING:  WatchFiles detected changes in 'database.py', 'ingest.py', 'main.py', 'brief.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [22100]
-INFO:     Started server process [27280]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
+Request GET /repos/americanexpress/iguazu-rest/topics failed with 403: Forbidden
+Setting next backoff to 2105.291151s
+WARNING:  WatchFiles detected changes in 'main.py'. Reloading...

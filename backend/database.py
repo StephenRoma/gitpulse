@@ -94,6 +94,9 @@ async def init_db():
         )""",
         "ALTER TABLE engineers ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL",
         "ALTER TABLE engineers ADD COLUMN company TEXT",
+        "ALTER TABLE accounts ADD COLUMN ticker_symbol TEXT",
+        "ALTER TABLE accounts ADD COLUMN news_name TEXT",
+        "ALTER TABLE accounts ADD COLUMN avatar_url TEXT",
     ]:
         try:
             async with aiosqlite.connect(DB_PATH) as db:
@@ -125,11 +128,12 @@ async def get_account(account_id: int):
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def create_account(name: str, github_org: str, account_type: str, engineers: list[str]):
+async def create_account(name: str, github_org: str, account_type: str, engineers: list[str],
+                         ticker_symbol: str = None, news_name: str = None):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO accounts (name, github_org, account_type) VALUES (?, ?, ?)",
-            (name, github_org, account_type)
+            "INSERT INTO accounts (name, github_org, account_type, ticker_symbol, news_name) VALUES (?, ?, ?, ?, ?)",
+            (name, github_org, account_type, ticker_symbol or None, news_name or None)
         )
         account_id = cursor.lastrowid
         for username in engineers:
@@ -147,7 +151,8 @@ async def delete_account(account_id: int):
         await db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         await db.commit()
 
-async def update_account(account_id: int, name: str = None, github_org: str = None, account_type: str = None):
+async def update_account(account_id: int, name: str = None, github_org: str = None, account_type: str = None,
+                         ticker_symbol: str = None, news_name: str = None):
     updates, values = [], []
     if name is not None:
         updates.append("name = ?")
@@ -158,6 +163,12 @@ async def update_account(account_id: int, name: str = None, github_org: str = No
     if account_type is not None:
         updates.append("account_type = ?")
         values.append(account_type)
+    if ticker_symbol is not None:
+        updates.append("ticker_symbol = ?")
+        values.append(ticker_symbol or None)
+    if news_name is not None:
+        updates.append("news_name = ?")
+        values.append(news_name or None)
     if not updates:
         return await get_account(account_id)
     values.append(account_id)
@@ -227,6 +238,36 @@ async def get_signals(account_id: int, limit: int = 500, per_engineer: int = 40)
                 result.append(d)
             return result
 
+async def get_hot_signals(limit: int = 10) -> list:
+    """Returns the top signals by sig_score across all accounts, with account name attached."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT s.*,
+                   a.name AS account_name,
+                   COALESCE(
+                       CAST(json_extract(s.raw_data, '$.sig_score') AS INTEGER), 0
+                   ) AS _score
+            FROM signals s
+            JOIN accounts a ON a.id = s.account_id
+            ORDER BY _score DESC, s.detected_at DESC
+            LIMIT ?
+        """, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                d.pop('_score', None)
+                if d.get('repo_topics'):
+                    try:
+                        d['repo_topics'] = json.loads(d['repo_topics'])
+                    except:
+                        d['repo_topics'] = []
+                else:
+                    d['repo_topics'] = []
+                result.append(d)
+            return result
+
 async def save_signal(account_id: int, engineer_username: str, signal_type: str,
                       repo_name: str, repo_url: str, repo_description: str,
                       repo_language: str, repo_topics: list, raw_data: dict):
@@ -266,12 +307,18 @@ async def save_briefing(account_id: int, content: str):
         )
         await db.commit()
 
-async def update_account_meta(account_id: int, score: int):
+async def update_account_meta(account_id: int, score: int, avatar_url: str = None):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            UPDATE accounts SET signal_score = ?, last_synced = datetime('now')
-            WHERE id = ?
-        """, (score, account_id))
+        if avatar_url:
+            await db.execute("""
+                UPDATE accounts SET signal_score = ?, last_synced = datetime('now'), avatar_url = ?
+                WHERE id = ?
+            """, (score, avatar_url, account_id))
+        else:
+            await db.execute("""
+                UPDATE accounts SET signal_score = ?, last_synced = datetime('now')
+                WHERE id = ?
+            """, (score, account_id))
         await db.commit()
 
 async def add_engineer_to_account(account_id: int, username: str):

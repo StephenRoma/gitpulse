@@ -1,6 +1,6 @@
-﻿import { useState } from 'react'
+﻿import logo from '../assets/logo.svg'
 
-export default function TopNav({ accounts = [], onAddAccount }) {
+export default function TopNav({ accounts = [], onAddAccount, page = 'dashboard', onPageChange }) {
   const lastSynced = accounts.reduce((latest, a) => {
     if (!a.last_synced) return latest
     const d = new Date(a.last_synced)
@@ -14,15 +14,18 @@ export default function TopNav({ accounts = [], onAddAccount }) {
   return (
     <div className="gp-topnav">
       <div className="gp-logo">
-        <div className="gp-logo-mark">G</div>
-        <div className="gp-logo-name">Git<span>Pulse</span></div>
-        <div className="gp-logo-beta">BETA</div>
+        <img src={logo} className="gp-logo-mark" alt="Temporality" />
       </div>
 
       <div className="gp-nav-pills">
-        <button className="gp-nav-pill active">Dashboard</button>
-        <button className="gp-nav-pill">Accounts</button>
-        <button className="gp-nav-pill">Reports</button>
+        <button
+          className={`gp-nav-pill${page === 'dashboard' ? ' active' : ''}`}
+          onClick={() => onPageChange?.('dashboard')}
+        >Dashboard</button>
+        <button
+          className={`gp-nav-pill${page === 'accounts' ? ' active' : ''}`}
+          onClick={() => onPageChange?.('accounts')}
+        >Accounts</button>
       </div>
 
       <div className="gp-nav-right">

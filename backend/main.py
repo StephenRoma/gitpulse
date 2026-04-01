@@ -36,12 +36,17 @@ sync_status: dict[int, dict] = {}
 def set_syncing(account_id: int, status: str, detail: str = ""):
     sync_status[account_id] = {"status": status, "detail": detail}
 
+# ── In-memory report status ───────────────────────────────────────────────────
+report_status: dict[int, dict] = {}
+
 # ── Pydantic models ──────────────────────────────────────────────────────────
 class CreateAccountRequest(BaseModel):
     name: str
     github_org: Optional[str] = ""
     account_type: str = "prospect"
     engineers: list[str] = []
+    ticker_symbol: Optional[str] = None
+    news_name: Optional[str] = None
 
 class AddEngineerRequest(BaseModel):
     username: str
@@ -54,6 +59,8 @@ class UpdateAccountRequest(BaseModel):
     name: Optional[str] = None
     github_org: Optional[str] = None
     account_type: Optional[str] = None
+    ticker_symbol: Optional[str] = None
+    news_name: Optional[str] = None
 
 class CreateTeamRequest(BaseModel):
     name: str
@@ -69,6 +76,11 @@ class AssignTeamRequest(BaseModel):
 class TagSignalRequest(BaseModel):
     theme: str
 
+# ── Hot signals (cross-account) ───────────────────────────────────────────────
+@app.get("/signals/hot")
+async def get_hot_signals(limit: int = 10):
+    return await db.get_hot_signals(limit=min(limit, 50))
+
 # ── Accounts ─────────────────────────────────────────────────────────────────
 @app.get("/accounts")
 async def list_accounts():
@@ -80,7 +92,9 @@ async def create_account(req: CreateAccountRequest):
         name=req.name,
         github_org=req.github_org,
         account_type=req.account_type,
-        engineers=req.engineers
+        engineers=req.engineers,
+        ticker_symbol=req.ticker_symbol,
+        news_name=req.news_name,
     )
     return {"id": account_id, "message": "Account created"}
 
@@ -99,7 +113,8 @@ async def get_account(account_id: int):
 @app.patch("/accounts/{account_id}")
 async def update_account(account_id: int, req: UpdateAccountRequest):
     account = await db.update_account(
-        account_id, name=req.name, github_org=req.github_org, account_type=req.account_type
+        account_id, name=req.name, github_org=req.github_org, account_type=req.account_type,
+        ticker_symbol=req.ticker_symbol, news_name=req.news_name,
     )
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -173,6 +188,22 @@ async def untag_signal(signal_id: int, theme: str):
     await db.untag_signal(signal_id, theme)
     return {"message": "Untagged"}
 # ── Reports ────────────────────────────────────────────────────────────────
+# Auto-group signals by type when no manual tags exist
+SIGNAL_TYPE_TO_THEME = {
+    "release":       "platform_eng",
+    "new_repo":      "platform_eng",
+    "push":          "platform_eng",
+    "org_issue":     "tech_debt",
+    "issue_comment": "tech_debt",
+    "star":          "vendor_eval",
+    "fork":          "vendor_eval",
+    "hn_mention":    "vendor_eval",
+    "news_mention":  "modernization",
+    "press_release": "modernization",
+    "sec_filing":    "modernization",
+    "reddit_buzz":   "vendor_eval",
+}
+
 THEME_LABELS = {
     "modernization":   "Modernization",
     "cloud_migration": "Cloud Migration",
@@ -196,8 +227,12 @@ async def get_report(account_id: int):
         pass
     return report
 
+@app.get("/accounts/{account_id}/report/status")
+async def get_report_status(account_id: int):
+    return report_status.get(account_id, {"status": "idle"})
+
 @app.post("/accounts/{account_id}/report/generate")
-async def generate_report(account_id: int):
+async def generate_report(account_id: int, background_tasks: BackgroundTasks):
     account = await db.get_account(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -205,17 +240,40 @@ async def generate_report(account_id: int):
     if not key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
-    tagged_signals = await db.get_tagged_signals(account_id)
-    if not tagged_signals:
-        raise HTTPException(status_code=400, detail="No tagged signals. Tag signals in the feed first.")
+    async def _generate():
+        report_status[account_id] = {"status": "generating", "detail": "Claude is writing your report..."}
+        try:
+            await _do_generate_report(account_id, account, key)
+            report_status[account_id] = {"status": "done"}
+        except Exception as e:
+            report_status[account_id] = {"status": "error", "detail": str(e)}
+            print(f"[report] Error for account {account_id}: {e}")
 
-    # Group signals by theme
+    background_tasks.add_task(_generate)
+    return {"message": "Report generation started"}
+
+async def _do_generate_report(account_id: int, account: dict, key: str):
+    tagged_signals = await db.get_tagged_signals(account_id)
+
+    # Group signals by theme — fall back to auto-grouping if no manual tags
     theme_groups: dict[str, list] = {}
-    for sig in tagged_signals:
-        for theme in sig.get("themes", []):
+    if tagged_signals:
+        for sig in tagged_signals:
+            for theme in sig.get("themes", []):
+                if theme not in theme_groups:
+                    theme_groups[theme] = []
+                theme_groups[theme].append(sig)
+    else:
+        # Auto-group recent signals by signal type
+        recent = await db.get_signals(account_id, limit=60)
+        for sig in recent:
+            theme = SIGNAL_TYPE_TO_THEME.get(sig.get("signal_type", ""), "platform_eng")
             if theme not in theme_groups:
                 theme_groups[theme] = []
-            theme_groups[theme].append(sig)
+            if len(theme_groups[theme]) < 10:
+                theme_groups[theme].append(sig)
+        # Keep only themes with signals
+        theme_groups = {k: v for k, v in theme_groups.items() if v}
 
     # Fetch latest briefing for context
     briefing_row = await db.get_latest_briefing(account_id)
@@ -238,7 +296,7 @@ async def generate_report(account_id: int):
                 except: raw = {}
             desc = (s.get("repo_description") or "")[:80]
             lines.append(f"  - [{s['signal_type'].upper()}] {s.get('engineer_username','')} → {s['repo_name']}: {desc}")
-        theme_blocks.append(f"THEME: {label}\n" + "\n".join(lines))
+        theme_blocks.append(f"THEME KEY: {theme}\nTHEME LABEL: {label}\n" + "\n".join(lines))
 
     prompt = (
         f"You are writing a sales intelligence report for Relevantz about {account['name']}.\n"
@@ -249,8 +307,9 @@ async def generate_report(account_id: int):
         f"2. Explains the business implication or pain point\n"
         f"3. Suggests a specific Relevantz angle to open a conversation\n\n"
         + "\n\n".join(theme_blocks)
-        + "\n\nReturn a JSON array (no markdown fences) with one object per theme:\n"
-        "[{\"theme\": \"theme_key\", \"narrative\": \"...\"}]"
+        + "\n\nReturn a JSON array (no markdown fences) with one object per theme.\n"
+        "Use the exact THEME KEY value in each object:\n"
+        "[{\"theme\": \"<THEME KEY>\", \"narrative\": \"...\"}]"
     )
 
     from anthropic import AsyncAnthropic

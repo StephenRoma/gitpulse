@@ -22,16 +22,35 @@ Your edge is PRECIENCE — infer what is about to happen before announcements. L
 Cross-reference signals to build hypotheses. A hypothesis needs at least 2 corroborating signals.
 State confidence: HIGH (3+ signals), MEDIUM (2 signals), LOW (inference only).
 
-Signal types you will see:
-- [STAR] = engineer starred an external repo (evaluating a tool)
-- [FORK] = engineer forked a repo (actively building with it)
-- [NEW_REPO] = engineer created a new repo (shipping something)
-- [ISSUE_COMMENT] = engineer commented on an issue in an external repo (hitting pain)
-- [RELEASE] = org published a new release (shipping cadence signal)
-- [ORG_ISSUE] = open issue on org's own repos (documented complaint, roadmap, or pressure)
-- [HN_MENTION] = org or engineers mentioned on HackerNews (external perception)
+Signal types you will see (format: [TYPE|CERTAINTY]):
+- [STAR|EVALUATING] = engineer starred an external repo (evaluating a tool)
+- [FORK|ACTIVE] = engineer forked a repo (actively building with it)
+- [NEW_REPO|CONFIRMED] = engineer created their own new repo (shipping something)
+- [NEW_REPO|ACTIVE] = engineer forked and created a new repo
+- [ISSUE_COMMENT|ACTIVE] = engineer commented on a high-value labeled issue (hitting pain)
+- [ISSUE_COMMENT|EVALUATING] = engineer commented on a general issue
+- [RELEASE|CONFIRMED] = org published a full release (shipping cadence signal)
+- [RELEASE|EVALUATING] = org published a prerelease / beta
+- [ORG_ISSUE|ACTIVE] = open issue on org's repos with migration/roadmap/security labels
+- [ORG_ISSUE|EVALUATING] = open issue on org's repos (general)
+- [HN_MENTION|EVALUATING] = org or engineers mentioned on HackerNews (external perception)
+- [NEWS_MENTION|ACTIVE] = risk news (breach, layoff, lawsuit, outage) about the company
+- [NEWS_MENTION|CONFIRMED] = financial or product news (earnings, acquisition, product launch)
+- [NEWS_MENTION|EVALUATING] = general news mention
+- [PRESS_RELEASE|CONFIRMED] = official company press release (BusinessWire / PRNewswire) — treat as authoritative
+- [SEC_FILING|CONFIRMED] = SEC 8-K filing — major corporate event (M&A, executive change, data breach disclosure, material event)
+- [REDDIT_BUZZ|EVALUATING] = community discussion on Reddit — candid unfiltered sentiment
 
-Be specific, data-driven, sales-focused. Reference actual engineer names, repo names, labels, and issue titles.
+CERTAINTY tiers: CONFIRMED = definitive shipping/building; ACTIVE = in-progress work; EVALUATING = early signal/inference.
+
+CROSS-REFERENCING RULES — elevate urgency when you see these combinations:
+- SEC 8-K (acquisition/M&A) + engineers evaluating a competitor tool → budget disruption imminent, engage immediately
+- Risk news (breach, fine) + org_issue labeled security/compliance → forced vendor evaluation underway
+- Press release (new product launch) + engineers starring related tools → integration work kickoff signal
+- Financial news (earnings miss, cost-cutting) + tech_debt org issues → consolidation / platform simplification play
+- Reddit negative sentiment + HN mentions + org issues → public pain creating internal pressure to change
+
+Be specific, data-driven, sales-focused. Reference actual engineer names, repo names, labels, headlines, and filing dates.
 Format your response as JSON with this exact structure:
 {
   "summary": "2-3 sentence executive summary of the technology signals",
@@ -67,32 +86,55 @@ def _format_signal(s: dict) -> str:
         except Exception:
             raw = {}
 
+    certainty = raw.get("certainty", "evaluating").upper()
+    type_tag  = f"{sig_type}|{certainty}"
+
     if sig_type == "ISSUE_COMMENT":
         labels = ", ".join(raw.get("labels", []))
         preview = (raw.get("comment_preview", "") or "")[:80]
-        return f"- [{sig_type}] {eng} → {repo} (issue: \"{raw.get('issue_title','')[:80]}\" labels: {labels}) \"{preview}\""
+        return f"- [{type_tag}] {eng} → {repo} (issue: \"{raw.get('issue_title','')[:80]}\" labels: {labels}) \"{preview}\""
 
     if sig_type in ("RELEASE",):
         tag  = raw.get("tag", "")
         name = raw.get("release_name", "")
         pre  = " [PRERELEASE]" if raw.get("prerelease") else ""
         body = (raw.get("body_preview", "") or "")[:80]
-        return f"- [{sig_type}] {eng} → {repo} ({tag} {name}){pre} \"{body}\""
+        return f"- [{type_tag}] {eng} → {repo} ({tag} {name}){pre} \"{body}\""
 
     if sig_type == "ORG_ISSUE":
         labels = ", ".join(raw.get("labels", []))
         body   = (raw.get("body_preview", "") or "")[:80]
-        return f"- [{sig_type}] {eng} → {repo} issue#{raw.get('issue_number','')} \"{raw.get('issue_title','')[:80]}\" [{labels}] \"{body}\""
+        return f"- [{type_tag}] {eng} → {repo} issue#{raw.get('issue_number','')} \"{raw.get('issue_title','')[:80]}\" [{labels}] \"{body}\""
 
     if sig_type == "HN_MENTION":
         pts     = raw.get("points", 0)
         cmts    = raw.get("num_comments", 0)
         preview = (raw.get("text_preview", "") or "")[:80]
-        return f"- [{sig_type}] {eng} → \"{desc}\" ({pts}pts, {cmts} comments) \"{preview}\""
+        return f"- [{type_tag}] {eng} → \"{desc}\" ({pts}pts, {cmts} comments) \"{preview}\""
+
+    if sig_type in ("NEWS_MENTION", "PRESS_RELEASE"):
+        category = raw.get("news_category", "general").upper()
+        source   = raw.get("source", repo)
+        headline = (raw.get("headline", desc) or desc)[:120]
+        return f"- [{type_tag}|{category}] {source} → \"{headline}\""
+
+    if sig_type == "SEC_FILING":
+        form     = raw.get("form_type", "8-K")
+        company  = raw.get("company", eng)
+        filed    = raw.get("filed_date", "")
+        return f"- [{type_tag}] {company} filed {form} with SEC on {filed}"
+
+    if sig_type == "REDDIT_BUZZ":
+        subreddit = raw.get("subreddit", "")
+        score_val = raw.get("score", 0)
+        cmts      = raw.get("num_comments", 0)
+        category  = raw.get("news_category", "general").upper()
+        headline  = (raw.get("headline", desc) or desc)[:120]
+        return f"- [{type_tag}|{category}] r/{subreddit} ({score_val}pts, {cmts} comments) \"{headline}\""
 
     topics_str = ", ".join(topics[:5])
     return (
-        f"- [{sig_type}] {eng} → {repo} ({lang}) {desc} "
+        f"- [{type_tag}] {eng} → {repo} ({lang}) {desc} "
         f"{'[topics: ' + topics_str + ']' if topics_str else ''}"
     )
 

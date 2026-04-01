@@ -71,11 +71,9 @@ html, body, #root {
 }
 .gp-logo { display: flex; align-items: center; gap: 10px; }
 .gp-logo-mark {
-  width: 32px; height: 32px;
-  background: var(--navy);
-  border-radius: 9px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--display); font-weight: 800; font-size: 15px; color: var(--magenta);
+  width: 200px; height: 200px;
+  object-fit: contain;
+  display: block;
 }
 .gp-logo-name {
   font-family: var(--display); font-weight: 800; font-size: 17px;

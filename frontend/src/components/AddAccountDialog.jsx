@@ -2,7 +2,7 @@
 import { Dialog, FormGroup, InputGroup, Button, HTMLSelect } from '@blueprintjs/core'
 
 export default function AddAccountDialog({ isOpen, onClose, onSubmit }) {
-  const [form, setForm] = useState({ github_org: '', name: '', account_type: 'prospect' })
+  const [form, setForm] = useState({ github_org: '', name: '', account_type: 'prospect', ticker_symbol: '', news_name: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -17,7 +17,7 @@ export default function AddAccountDialog({ isOpen, onClose, onSubmit }) {
     setError('')
     try {
       await onSubmit({ ...form, name: form.name || form.github_org })
-      setForm({ github_org: '', name: '', account_type: 'prospect' })
+      setForm({ github_org: '', name: '', account_type: 'prospect', ticker_symbol: '', news_name: '' })
     } catch (err) {
       setError(err.message || 'Failed to create account')
     } finally {
@@ -45,6 +45,19 @@ export default function AddAccountDialog({ isOpen, onClose, onSubmit }) {
             <option value="client">Active Client</option>
           </HTMLSelect>
         </FormGroup>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <FormGroup label="Ticker Symbol" labelFor="ticker" style={{ flex: 1 }}
+            helperText={<span style={{ fontSize: 10, color: '#6B7280' }}>e.g. MSFT — enables SEC 8-K filings</span>}>
+            <InputGroup id="ticker" placeholder="Optional" maxLength={10}
+              value={form.ticker_symbol}
+              onChange={e => setForm(prev => ({ ...prev, ticker_symbol: e.target.value.toUpperCase() }))}
+            />
+          </FormGroup>
+          <FormGroup label="News Search Name" labelFor="newsname" style={{ flex: 2 }}
+            helperText={<span style={{ fontSize: 10, color: '#6B7280' }}>Override name used for news/press/Reddit search</span>}>
+            <InputGroup id="newsname" placeholder="Optional" value={form.news_name} onChange={set('news_name')} />
+          </FormGroup>
+        </div>
         {error && <div style={{ color: '#C8005A', marginBottom: 12, fontSize: 12 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <Button minimal onClick={onClose}>Cancel</Button>

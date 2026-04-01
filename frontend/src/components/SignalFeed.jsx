@@ -1,9 +1,9 @@
 ﻿import { useState, useRef, useEffect } from 'react'
 import { Spinner } from '@blueprintjs/core'
 
-const SIGNAL_ICONS   = { star: '\u2605', fork: '\u2482', new_repo: '\u25C8', push: '\u2191', issue_comment: '\uD83D\uDCAC', release: '\uD83C\uDFF7', org_issue: '\u26A0', hn_mention: '\u25CE' }
-const SIGNAL_ACTIONS = { star: 'starred', fork: 'forked', new_repo: 'created repo', push: 'pushed to', issue_comment: 'commented on issue in', release: 'published release', org_issue: 'open issue on', hn_mention: 'mentioned on HN' }
-const TYPE_LABELS    = { star: 'Star', fork: 'Fork', new_repo: 'New Repo', push: 'Push', issue_comment: 'Issue Comment', release: 'Release', org_issue: 'Org Issue', hn_mention: 'HN Mention' }
+const SIGNAL_ICONS   = { star: '\u2605', fork: '\u2482', new_repo: '\u25C8', push: '\u2191', issue_comment: '\uD83D\uDCAC', release: '\uD83C\uDFF7', org_issue: '\u26A0', hn_mention: '\u25CE', news_mention: '\uD83D\uDCF0', press_release: '\uD83D\uDCE3', sec_filing: '\uD83C\uDFDB', reddit_buzz: '\u2B06' }
+const SIGNAL_ACTIONS = { star: 'starred', fork: 'forked', new_repo: 'created repo', push: 'pushed to', issue_comment: 'commented on issue in', release: 'published release', org_issue: 'open issue on', hn_mention: 'mentioned on HN', news_mention: 'in the news', press_release: 'press release', sec_filing: 'filed 8-K with SEC', reddit_buzz: 'discussed on Reddit' }
+const TYPE_LABELS    = { star: 'Star', fork: 'Fork', new_repo: 'New Repo', push: 'Push', issue_comment: 'Issue Comment', release: 'Release', org_issue: 'Org Issue', hn_mention: 'HN Mention', news_mention: 'News', press_release: 'Press Release', sec_filing: 'SEC 8-K', reddit_buzz: 'Reddit' }
 
 function sigScore(signal) {
   try { return JSON.parse(signal.raw_data || '{}').sig_score || 0 } catch { return 0 }
@@ -13,6 +13,18 @@ function sigHeat(signal) {
   const score = sigScore(signal)
   return score >= 6 ? 'hot' : score >= 3 ? 'warm' : 'cool'
 }
+
+function sigCertainty(signal) {
+  try { return JSON.parse(signal.raw_data || '{}').certainty || 'evaluating' } catch { return 'evaluating' }
+}
+
+const CERTAINTY_OPTS = [
+  { key: null,          label: 'All' },
+  { key: 'confirmed',   label: 'Confirmed',  fg: '#166534', bg: '#F0FDF4', bd: '#BBF7D0' },
+  { key: 'active',      label: 'Active',     fg: '#0369A1', bg: '#EFF6FF', bd: '#BFDBFE' },
+  { key: 'evaluating',  label: 'Evaluating', fg: '#92400E', bg: '#FFFBEB', bd: '#FDE68A' },
+]
+const CERTAINTY_MAP = Object.fromEntries(CERTAINTY_OPTS.filter(o => o.key).map(o => [o.key, o]))
 
 const heatFg = (h) => h === 'hot' ? '#C8005A' : h === 'warm' ? '#D97706' : '#2563EB'
 const heatBg = (h) => h === 'hot' ? '#FFF0F5' : h === 'warm' ? '#FFFBEB' : '#EFF6FF'
@@ -83,12 +95,24 @@ function TagPopover({ signalId, activeTags = [], onTag, onUntag, onClose }) {
   )
 }
 
+const ENGINEERING_TYPES = new Set(['star','fork','new_repo','push','issue_comment','release','org_issue','hn_mention'])
+const BUSINESS_TYPES    = new Set(['news_mention','press_release','sec_filing','reddit_buzz'])
+
+const NEWS_CAT_COLORS = {
+  risk:      { fg: '#991B1B', bg: '#FEF2F2', bd: '#FECACA' },
+  financial: { fg: '#065F46', bg: '#ECFDF5', bd: '#6EE7B7' },
+  product:   { fg: '#1E40AF', bg: '#EFF6FF', bd: '#BFDBFE' },
+  general:   { fg: '#6B7280', bg: '#F9FAFB', bd: '#E5E7EB' },
+}
+
 export default function SignalFeed({ signals, loading, engineers = [], signalTags = {}, onTagSignal, onUntagSignal }) {
-  const [activeHeat,     setActiveHeat]     = useState(null)
-  const [activeType,     setActiveType]     = useState(null)
-  const [activeEngineer, setActiveEngineer] = useState('')
-  const [minScore,       setMinScore]       = useState(0)
-  const [openTagId,      setOpenTagId]      = useState(null)
+  const [activeHeat,      setActiveHeat]      = useState(null)
+  const [activeType,      setActiveType]      = useState(null)
+  const [activeEngineer,  setActiveEngineer]  = useState('')
+  const [minScore,        setMinScore]        = useState(0)
+  const [activeCertainty, setActiveCertainty] = useState(null)
+  const [openTagId,       setOpenTagId]       = useState(null)
+  const [sourceFilter,    setSourceFilter]    = useState('all') // 'all' | 'engineering' | 'business'
 
   if (loading) {
     return (
@@ -107,16 +131,21 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
   }
 
   const filtered = signals.filter(s =>
-    (!activeHeat     || sigHeat(s) === activeHeat) &&
-    (!activeType     || s.signal_type === activeType) &&
-    (!activeEngineer || s.engineer_username === activeEngineer) &&
-    (sigScore(s) >= minScore)
+    (!activeHeat      || sigHeat(s) === activeHeat) &&
+    (!activeType      || s.signal_type === activeType) &&
+    (!activeEngineer  || s.engineer_username === activeEngineer) &&
+    (!activeCertainty || sigCertainty(s) === activeCertainty) &&
+    (sigScore(s) >= minScore) &&
+    (sourceFilter === 'all' ||
+     (sourceFilter === 'engineering' && ENGINEERING_TYPES.has(s.signal_type)) ||
+     (sourceFilter === 'business'    && BUSINESS_TYPES.has(s.signal_type)))
   )
-  const filtersActive = activeHeat || activeType || activeEngineer || minScore > 0
+  const filtersActive = activeHeat || activeType || activeEngineer || minScore > 0 || activeCertainty || sourceFilter !== 'all'
 
-  function toggleHeat(h) { setActiveHeat(prev => prev === h ? null : h) }
-  function toggleType(t) { setActiveType(prev => prev === t ? null : t) }
-  function clearFilters() { setActiveHeat(null); setActiveType(null); setActiveEngineer(''); setMinScore(0) }
+  function toggleHeat(h)      { setActiveHeat(prev => prev === h ? null : h) }
+  function toggleType(t)      { setActiveType(prev => prev === t ? null : t) }
+  function toggleCertainty(c) { setActiveCertainty(prev => prev === c ? null : c) }
+  function clearFilters()     { setActiveHeat(null); setActiveType(null); setActiveEngineer(''); setMinScore(0); setActiveCertainty(null); setSourceFilter('all') }
 
   const chipBase = { cursor: 'pointer', userSelect: 'none', border: '1px solid', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'var(--mono)', transition: 'all 0.15s' }
 
@@ -124,6 +153,20 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
     <div>
       {/* Filter bar */}
       <div style={{ padding: '10px 0 8px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+
+        {/* Row 0: Source toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginRight: 2 }}>SOURCE</span>
+          {[['all','All'],['engineering','Engineering'],['business','Business']].map(([k,l]) => (
+            <span key={k} onClick={() => setSourceFilter(k)} style={{
+              ...chipBase,
+              color: sourceFilter === k ? 'var(--navy)' : 'var(--text-secondary)',
+              background: sourceFilter === k ? 'var(--bg)' : 'transparent',
+              borderColor: sourceFilter === k ? 'var(--navy)' : 'var(--border)',
+              fontWeight: sourceFilter === k ? 700 : 400,
+            }}>{l}</span>
+          ))}
+        </div>
 
         {/* Row 1: Heat filters + count */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -171,7 +214,27 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
           ))}
         </div>
 
-        {/* Row 4: Engineer dropdown + clear */}
+        {/* Row 4: Certainty filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginRight: 2 }}>CERTAINTY</span>
+          {CERTAINTY_OPTS.map(opt => {
+            const active = activeCertainty === opt.key
+            const fg = opt.fg || 'var(--text-secondary)'
+            const bg = opt.bg || 'var(--bg)'
+            const bd = opt.bd || 'var(--border)'
+            return (
+              <span key={String(opt.key)} onClick={() => toggleCertainty(opt.key)} style={{
+                ...chipBase,
+                color: active ? fg : 'var(--text-secondary)',
+                background: active ? bg : 'transparent',
+                borderColor: active ? bd : 'var(--border)',
+                fontWeight: active ? 700 : 400,
+              }}>{opt.label}</span>
+            )
+          })}
+        </div>
+
+        {/* Row 5: Engineer dropdown + clear */}
         {engineers.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginRight: 2 }}>ENG</span>
@@ -200,7 +263,9 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
         </div>
       ) : (
         filtered.map(s => {
-          const heat   = sigHeat(s)
+          const heat      = sigHeat(s)
+          const certainty = sigCertainty(s)
+          const certOpt   = CERTAINTY_MAP[certainty] || CERTAINTY_MAP['evaluating']
           const icon   = SIGNAL_ICONS[s.signal_type]   || '\u00B7'
           const action = SIGNAL_ACTIONS[s.signal_type] || s.signal_type
           let raw = {}
@@ -246,6 +311,41 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
                 {raw.points > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#FFF7ED', border: '1px solid #FED7AA', color: '#C2410C' }}>{raw.points}pts</span>}
               </>
             )
+          } else if (s.signal_type === 'news_mention' || s.signal_type === 'press_release') {
+            const cat = raw.news_category || 'general'
+            const catColors = NEWS_CAT_COLORS[cat] || NEWS_CAT_COLORS.general
+            detail = (
+              <>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{(raw.headline || s.repo_description || '').slice(0,100)}</span>
+                <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 6px', borderRadius: 3,
+                  background: catColors.bg, border: `1px solid ${catColors.bd}`, color: catColors.fg,
+                  fontFamily: 'var(--mono)', fontWeight: 700, letterSpacing: '0.04em' }}>{cat.toUpperCase()}</span>
+                {raw.source && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>{raw.source}</span>}
+              </>
+            )
+          } else if (s.signal_type === 'sec_filing') {
+            detail = (
+              <>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{raw.company || s.repo_description}</span>
+                <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 6px', borderRadius: 3,
+                  background: '#ECFDF5', border: '1px solid #6EE7B7', color: '#065F46',
+                  fontFamily: 'var(--mono)', fontWeight: 700 }}>{raw.form_type || '8-K'}</span>
+                {raw.filed_date && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>{raw.filed_date}</span>}
+              </>
+            )
+          } else if (s.signal_type === 'reddit_buzz') {
+            const cat = raw.news_category || 'general'
+            const catColors = NEWS_CAT_COLORS[cat] || NEWS_CAT_COLORS.general
+            detail = (
+              <>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{(raw.headline || s.repo_description || '').slice(0,100)}</span>
+                <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 6px', borderRadius: 3,
+                  background: catColors.bg, border: `1px solid ${catColors.bd}`, color: catColors.fg,
+                  fontFamily: 'var(--mono)', fontWeight: 700, letterSpacing: '0.04em' }}>{cat.toUpperCase()}</span>
+                {raw.subreddit && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>r/{raw.subreddit}</span>}
+                {raw.num_comments > 0 && <span style={{ marginLeft: 4, fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#FFF7ED', border: '1px solid #FED7AA', color: '#C2410C' }}>{raw.num_comments} comments</span>}
+              </>
+            )
           } else {
             detail = (
               <>
@@ -286,6 +386,11 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
                   )
                 })}
               </div>
+              <div className="signal-heat-badge" style={{
+                fontSize: 8, padding: '2px 5px', borderRadius: 3, fontFamily: 'var(--mono)',
+                fontWeight: 700, letterSpacing: '0.06em', whiteSpace: 'nowrap', flexShrink: 0,
+                color: certOpt.fg, background: certOpt.bg, border: `1px solid ${certOpt.bd}`,
+              }}>{certainty.toUpperCase()}</div>
               <div className="signal-heat-badge" style={{
                 color: heatFg(heat), background: heatBg(heat), borderColor: heatBd(heat),
               }}>{heat.toUpperCase()}</div>

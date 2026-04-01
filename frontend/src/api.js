@@ -38,6 +38,8 @@ export const api = {
 
   getReport: (id) => req(`/accounts/${id}/report`),
   generateReport: (id) => req(`/accounts/${id}/report/generate`, { method: 'POST' }),
+  getReportStatus: (id) => req(`/accounts/${id}/report/status`),
+  getHotSignals: (limit = 10) => req(`/signals/hot?limit=${limit}`),
 
   getBriefing: (id) => req(`/accounts/${id}/briefing`),
   generateBriefing: (id) => req(`/accounts/${id}/briefing/generate`, { method: 'POST' }),

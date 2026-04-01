@@ -2,6 +2,7 @@
 import { Spinner } from '@blueprintjs/core'
 import { api } from './api'
 import TopNav from './components/TopNav'
+import AccountLogo from './components/AccountLogo'
 import AccountSidebar from './components/AccountSidebar'
 import BriefingCard from './components/BriefingCard'
 import SignalFeed from './components/SignalFeed'
@@ -10,6 +11,7 @@ import AddAccountDialog from './components/AddAccountDialog'
 import EditAccountDialog from './components/EditAccountDialog'
 import OutreachModal from './components/OutreachModal'
 import ReportModal from './components/ReportModal'
+import DashboardPage from './components/DashboardPage'
 
 const PALETTE = [
   '#C8005A','#1A6B9A','#2D6A4F','#6D3A9C',
@@ -64,6 +66,25 @@ export default function App() {
   const [reportOpen, setReportOpen]           = useState(false)
   const [reportData, setReportData]           = useState(null)
   const [reportLoading, setReportLoading]     = useState(false)
+  const [page, setPage]                       = useState(() => localStorage.getItem('gp_page') || 'dashboard')
+  const [stages, setStagesState]              = useState(() => {
+    try { return JSON.parse(localStorage.getItem('gitpulse_stages') || '{}') } catch { return {} }
+  })
+  const [hotSignals, setHotSignals]           = useState([])
+  const [hotLoading, setHotLoading]           = useState(false)
+
+  function setStage(accountId, stageKey) {
+    setStagesState(prev => {
+      const next = { ...prev, [accountId]: stageKey }
+      localStorage.setItem('gitpulse_stages', JSON.stringify(next))
+      return next
+    })
+  }
+
+  function handlePageChange(p) {
+    setPage(p)
+    localStorage.setItem('gp_page', p)
+  }
 
   function startResizeSidebar(e) {
     e.preventDefault()
@@ -90,7 +111,23 @@ export default function App() {
         setSelectedId(match ? match.id : accts[0].id)
       }
     }).catch(console.error)
+    // Fetch hot signals for dashboard
+    setHotLoading(true)
+    api.getHotSignals(15).then(setHotSignals).catch(() => setHotSignals([])).finally(() => setHotLoading(false))
   }, [])
+
+  // Refresh hot signals whenever we return to dashboard
+  useEffect(() => {
+    if (page === 'dashboard') {
+      setHotLoading(true)
+      api.getHotSignals(15).then(setHotSignals).catch(() => setHotSignals([])).finally(() => setHotLoading(false))
+    }
+  }, [page])
+
+  function handleSelectAccount(id) {
+    setSelectedId(id)
+    handlePageChange('accounts')
+  }
 
   const selectedAccount = accounts.find(a => a.id === selectedId) || null
 
@@ -208,8 +245,23 @@ export default function App() {
     setReportLoading(true)
     setReportOpen(true)
     try {
-      const data = await api.generateReport(selectedId)
-      setReportData(data)
+      await api.generateReport(selectedId)
+      // Poll until done
+      let tries = 0
+      while (tries < 60) {
+        await new Promise(r => setTimeout(r, 2000))
+        const status = await api.getReportStatus(selectedId)
+        if (status.status === 'done') {
+          const data = await api.getReport(selectedId)
+          setReportData(data?.content ?? data)
+          break
+        } else if (status.status === 'error') {
+          window.alert(`Report generation failed: ${status.detail}`)
+          setReportOpen(false)
+          break
+        }
+        tries++
+      }
     } catch (e) {
       window.alert(`Report generation failed: ${e.message}`)
       setReportOpen(false)
@@ -280,7 +332,27 @@ export default function App() {
 
   return (
     <div className="gp-layout">
-      <TopNav accounts={accounts} onAddAccount={() => setAddOpen(true)} />
+      <TopNav accounts={accounts} onAddAccount={() => setAddOpen(true)} page={page} onPageChange={handlePageChange} />
+
+      {/* ── Dashboard page ─────────────────────────────────────────── */}
+      {page === 'dashboard' && (
+        <div className="gp-body" style={{ overflow: 'hidden' }}>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <DashboardPage
+              accounts={accounts}
+              stages={stages}
+              onSetStage={setStage}
+              hotSignals={hotSignals}
+              hotLoading={hotLoading}
+              onSelectAccount={handleSelectAccount}
+              onSyncAll={() => api.syncAll()}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Accounts page ──────────────────────────────────────────── */}
+      {page === 'accounts' && (
       <div className="gp-body">
         <div style={{ width: sidebarWidth, flexShrink: 0, display: 'flex' }}>
           <AccountSidebar
@@ -307,12 +379,7 @@ export default function App() {
               <div className="acct-header">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <div style={{
-                      width: 46, height: 46, borderRadius: 12, flexShrink: 0,
-                      background: PALETTE[selectedAccount.id % 8],
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontFamily: 'var(--display)', fontWeight: 800, fontSize: 16, color: '#fff'
-                    }}>{initials(selectedAccount.name || selectedAccount.github_org)}</div>
+                    <AccountLogo account={selectedAccount} size={46} radius={12} />
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontFamily: 'var(--display)', fontWeight: 800, fontSize: 18, color: 'var(--navy)' }}>
@@ -608,6 +675,7 @@ export default function App() {
             engineers={engineers} teams={teams} onOutreach={() => setOutreachOpen(true)} />
         </div>
       </div>
+      )}
       <AddAccountDialog isOpen={addOpen} onClose={() => setAddOpen(false)} onSubmit={handleAddAccount} />
       <EditAccountDialog isOpen={editOpen} onClose={() => { setEditOpen(false); setEditAccount(null) }}
         account={editAccount} onSubmit={handleEditAccount} />
