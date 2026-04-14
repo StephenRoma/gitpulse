@@ -135,9 +135,9 @@ export default function RightPanel({ account, signals = [], engineers = [], team
       {/* Engineers mini-list */}
       {engineers.length > 0 && (
         <div style={{ flexShrink: 0 }}>
-          <div className="right-label">ENGINEERS ({engineers.length})</div>
+          <div className="right-label">CONTACTS ({engineers.length})</div>
           {engineers.slice(0, 4).map((eng, i) => {
-            const engSigs = signals.filter(s => s.actor_login === eng.github_username)
+            const engSigs = signals.filter(s => s.actor_login === eng.name)
             const heat = engSigs.reduce((best, s) => {
               const h = sigHeat(s)
               return h === 'hot' ? 'hot' : best === 'hot' ? 'hot' : h === 'warm' ? 'warm' : best
@@ -154,11 +154,11 @@ export default function RightPanel({ account, signals = [], engineers = [], team
                   background: PALETTE[i % 8],
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 7, fontWeight: 700, color: '#fff', fontFamily: 'var(--mono)'
-                }}>{eng.github_username.slice(0, 2).toUpperCase()}</div>
+                }}>{(eng.name || eng.role || 'CT').slice(0, 2).toUpperCase()}</div>
                 <span style={{
                   fontSize: 10, color: heatFg(heat), fontFamily: 'var(--mono)',
                   flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                }}>{eng.github_username}</span>
+                }}>{eng.name || eng.role || 'Contact'}</span>
                 {team && (
                   <span style={{
                     fontSize: 8, padding: '1px 5px', borderRadius: 3,

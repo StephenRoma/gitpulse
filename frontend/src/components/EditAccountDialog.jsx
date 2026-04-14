@@ -2,16 +2,16 @@ import { useState, useEffect } from 'react'
 import { Dialog, FormGroup, InputGroup, Button, HTMLSelect } from '@blueprintjs/core'
 
 export default function EditAccountDialog({ isOpen, onClose, account, onSubmit }) {
-  const [form, setForm]       = useState({ name: '', github_org: '', account_type: 'prospect' })
+  const [form, setForm]       = useState({ name: '', district_domain: '', account_type: 'prospect' })
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
 
   useEffect(() => {
     if (account) {
       setForm({
-        name:         account.name        || '',
-        github_org:   account.github_org  || '',
-        account_type: account.account_type || 'prospect',
+        name:               account.name               || '',
+        district_domain:    account.district_domain     || '',
+        account_type:       account.account_type        || 'prospect',
       })
       setError('')
     }
@@ -46,13 +46,13 @@ export default function EditAccountDialog({ isOpen, onClose, account, onSubmit }
         <FormGroup label="Display Name" labelFor="edit-name">
           <InputGroup id="edit-name" value={form.name} onChange={set('name')} />
         </FormGroup>
-        <FormGroup label="GitHub Organization" labelFor="edit-org">
-          <InputGroup id="edit-org" placeholder="e.g. facebook" value={form.github_org} onChange={set('github_org')} />
+        <FormGroup label="District Domain" labelFor="edit-org">
+          <InputGroup id="edit-org" placeholder="e.g. lausd.net" value={form.district_domain} onChange={set('district_domain')} />
         </FormGroup>
         <FormGroup label="Type">
           <HTMLSelect value={form.account_type} onChange={set('account_type')} fill>
-            <option value="prospect">Pipeline</option>
-            <option value="client">Active Client</option>
+            <option value="prospect">Prospect</option>
+            <option value="client">Partner District</option>
           </HTMLSelect>
         </FormGroup>
         {error && <div style={{ color: '#C8005A', marginBottom: 12, fontSize: 12 }}>{error}</div>}

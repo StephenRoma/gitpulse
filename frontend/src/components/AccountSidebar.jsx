@@ -44,8 +44,8 @@ export default function AccountSidebar({ accounts, selectedId, onSelect, onDelet
       <div className="sidebar-filters">
         {[
           { k: 'all',      l: 'All',      n: counts.all },
-          { k: 'clients',  l: 'Clients',  n: counts.client },
-          { k: 'pipeline', l: 'Pipeline', n: counts.prospect },
+          { k: 'clients',  l: 'Partners', n: counts.client },
+          { k: 'pipeline', l: 'Prospects', n: counts.prospect },
         ].map(f => (
           <button key={f.k}
             onClick={() => onFilter(f.k)}
@@ -78,7 +78,7 @@ export default function AccountSidebar({ accounts, selectedId, onSelect, onDelet
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
                     <span style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 13, color: 'var(--navy)' }}>
-                      {acc.name || acc.github_org}
+                      {acc.name || acc.district_domain}
                     </span>
                     <span style={{
                       fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
@@ -94,13 +94,13 @@ export default function AccountSidebar({ accounts, selectedId, onSelect, onDelet
                       color: acc.account_type === 'client' ? '#0369A1' : '#7C3AED',
                       border: `1px solid ${acc.account_type === 'client' ? '#BAE6FD' : '#DDD6FE'}`,
                       fontFamily: 'var(--mono)',
-                    }}>{acc.account_type === 'client' ? 'Active Client' : 'Pipeline'}</span>
+                    }}>{acc.account_type === 'client' ? 'Partner District' : 'Prospect'}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      {acc.github_org
+                      {acc.district_domain
                         ? <span style={{ fontSize: 9, color: '#2D6A4F', background: '#D1FAE5', border: '1px solid #6EE7B7', padding: '1px 5px', borderRadius: 4, fontFamily: 'var(--mono)' }}>
-                            org:{acc.github_org}
+                            {acc.district_domain}
                           </span>
-                        : <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>no org</span>
+                        : <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>no domain</span>
                       }
                       <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>
                         {acc.signal_count || 0} signals

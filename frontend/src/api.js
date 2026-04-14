@@ -52,5 +52,36 @@ export const api = {
   getSyncStatus: (id) => req(`/accounts/${id}/sync-status`),
   syncAll: () => req('/sync-all', { method: 'POST' }),
 
+  // RFP Finder
+  getRFPs: (accountId) => req(`/rfps${accountId ? `?account_id=${accountId}` : ''}`),
+  scanRFPs: (accountId) => req(`/accounts/${accountId}/rfps/scan`, { method: 'POST' }),
+  draftRFPProposal: (rfpId, vendorName, vendorDescription) =>
+    req(`/rfps/${rfpId}/draft`, { method: 'POST', body: { vendor_name: vendorName, vendor_description: vendorDescription } }),
+  deleteRFP: (rfpId) => req(`/rfps/${rfpId}`, { method: 'DELETE' }),
+
+  // Conferences
+  getConferences: () => req('/conferences'),
+  getConferencesForAccount: (accountId) => req(`/conferences/relevance/${accountId}`),
+  seedConferences: () => req('/conferences/seed', { method: 'POST' }),
+
+  // Spend Intelligence
+  getSpend: (accountId) => req(`/accounts/${accountId}/spend`),
+  scanSpend: (accountId) => req(`/accounts/${accountId}/spend/scan`, { method: 'POST' }),
+
+  // Contact Enrichment
+  enrichContact: (contactId, hint = '') => req(`/contacts/${contactId}/enrich`, { method: 'POST', body: { hint } }),
+
   health: () => req('/health'),
+
+  // Texas District Screener
+  getTexasRegions: () => req('/texas/regions'),
+  scanTexasRegion: (region) => req(`/texas/scan/${region}`, { method: 'POST' }),
+  getTexasScanStatus: (region) => req(`/texas/scan/${region}/status`),
+  getTexasDistricts: (region) => req(`/texas/districts?region=${region}`),
+  getTexasDistrict: (districtId) => req(`/texas/districts/${districtId}`),
+  generateTexasReport: (districtId) => req(`/texas/districts/${districtId}/report/generate`, { method: 'POST' }),
+  getTexasReportStatus: (districtId) => req(`/texas/districts/${districtId}/report/status`),
+  generateTexasClientReport: (districtId) => req(`/texas/districts/${districtId}/client-report/generate`, { method: 'POST' }),
+  getTexasClientReportStatus: (districtId) => req(`/texas/districts/${districtId}/client-report/status`),
+  addTexasDistrictToPipeline: (districtId) => req(`/texas/districts/${districtId}/pipeline`, { method: 'POST' }),
 }

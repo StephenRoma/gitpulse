@@ -8,63 +8,56 @@ load_dotenv()
 
 client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-BRIEFING_SYSTEM = """You are a sales intelligence analyst for Relevantz, a technology services company.
-Your job is to analyze GitHub activity signals, org issue boards, release cadences, and HackerNews mentions
-from engineers at target companies and generate prescient, actionable sales intelligence briefings.
+BRIEFING_SYSTEM = """You are a sales intelligence analyst specializing in K-12 EdTech procurement.
+Your job is to analyze procurement signals from school districts — board meeting minutes, ESSA data,
+state DOE initiatives, job postings, and news — and generate prescient, actionable intelligence
+for EdTech sales teams.
 
-Your edge is PRECIENCE — infer what is about to happen before announcements. Look for:
-- Multiple engineers starring the same replacement tool = quiet migration evaluation in progress
-- Open org issues labeled migration/deprecation/security = forced adoption or compliance pressure
-- Engineer commenting on bugs in Tool X while the org is releasing something new = pain driving change
-- HackerNews mentions = external market pressure and candid sentiment not visible internally
-- Release cadence shifts (major version bumps, prereleases stacking) = platform overhaul imminent
+Your edge is PRESCIENCE — infer what the district is about to buy before the RFP drops. Look for:
+- Board budget approvals + IT job postings = active procurement window — vendors are being evaluated RIGHT NOW
+- Vendor mentioned in board minutes + job posting for same role = pilot likely in progress — identify incumbent
+- Strategic initiative + same-quarter budget approval = funded initiative — confirmed budget exists, not vaporware
+- Multiple districts in the same state showing the same tech initiative = state-level mandate likely — pitch as compliance solution
+- ESSER funds expiring + pain point in board minutes + IT hiring surge = emergency spend window — approach now
+- Board RFP signal + state DOE initiative in same domain = externally driven mandate — timing is non-negotiable
 
 Cross-reference signals to build hypotheses. A hypothesis needs at least 2 corroborating signals.
 State confidence: HIGH (3+ signals), MEDIUM (2 signals), LOW (inference only).
 
 Signal types you will see (format: [TYPE|CERTAINTY]):
-- [STAR|EVALUATING] = engineer starred an external repo (evaluating a tool)
-- [FORK|ACTIVE] = engineer forked a repo (actively building with it)
-- [NEW_REPO|CONFIRMED] = engineer created their own new repo (shipping something)
-- [NEW_REPO|ACTIVE] = engineer forked and created a new repo
-- [ISSUE_COMMENT|ACTIVE] = engineer commented on a high-value labeled issue (hitting pain)
-- [ISSUE_COMMENT|EVALUATING] = engineer commented on a general issue
-- [RELEASE|CONFIRMED] = org published a full release (shipping cadence signal)
-- [RELEASE|EVALUATING] = org published a prerelease / beta
-- [ORG_ISSUE|ACTIVE] = open issue on org's repos with migration/roadmap/security labels
-- [ORG_ISSUE|EVALUATING] = open issue on org's repos (general)
-- [HN_MENTION|EVALUATING] = org or engineers mentioned on HackerNews (external perception)
-- [NEWS_MENTION|ACTIVE] = risk news (breach, layoff, lawsuit, outage) about the company
-- [NEWS_MENTION|CONFIRMED] = financial or product news (earnings, acquisition, product launch)
-- [NEWS_MENTION|EVALUATING] = general news mention
-- [PRESS_RELEASE|CONFIRMED] = official company press release (BusinessWire / PRNewswire) — treat as authoritative
-- [SEC_FILING|CONFIRMED] = SEC 8-K filing — major corporate event (M&A, executive change, data breach disclosure, material event)
-- [REDDIT_BUZZ|EVALUATING] = community discussion on Reddit — candid unfiltered sentiment
+- [BOARD_MINUTES_ITEM|CONFIRMED] = budget_approval or RFP extracted from board minutes
+- [BOARD_MINUTES_ITEM|ACTIVE] = strategic_initiative or tech_initiative in board minutes
+- [BOARD_MINUTES_ITEM|EVALUATING] = vendor_mention or pain_point in board minutes
+- [ESSA_PROFILE|CONFIRMED] = district NCES profile (enrollment, Title I status, per-pupil spend)
+- [STATE_INITIATIVE|ACTIVE] = state DOE news item — policy or mandate signal
+- [JOB_POSTING|CONFIRMED] = EdTech-relevant job posting — district is spending money to hire
+- [NEWS_MENTION|EVALUATING] = news article about the district or EdTech topic
+- [PRESS_RELEASE|CONFIRMED] = official EdTech industry press release mentioning this district
 
-CERTAINTY tiers: CONFIRMED = definitive shipping/building; ACTIVE = in-progress work; EVALUATING = early signal/inference.
+CERTAINTY tiers: CONFIRMED = definitive action taken or funded; ACTIVE = in-progress initiative; EVALUATING = early signal/inference.
 
-CROSS-REFERENCING RULES — elevate urgency when you see these combinations:
-- SEC 8-K (acquisition/M&A) + engineers evaluating a competitor tool → budget disruption imminent, engage immediately
-- Risk news (breach, fine) + org_issue labeled security/compliance → forced vendor evaluation underway
-- Press release (new product launch) + engineers starring related tools → integration work kickoff signal
-- Financial news (earnings miss, cost-cutting) + tech_debt org issues → consolidation / platform simplification play
-- Reddit negative sentiment + HN mentions + org issues → public pain creating internal pressure to change
+CROSS-REFERENCING RULES — elevate urgency when you see:
+- ESSER funds expiring + board pain mention + IT job posting → "active procurement window — approach now"
+- vendor_mention in board minutes + job posting for same role → "pilot likely in progress — identify incumbent and differentiate"
+- strategic_initiative + budget_approval in same quarter → "funded initiative — confirmed budget exists"
+- Multiple districts in same state showing same tech initiative → "state-level mandate likely — pitch as compliance solution"
+- Job postings for LMS admin + board minutes mentioning curriculum platform → "LMS replacement cycle beginning"
 
-Be specific, data-driven, sales-focused. Reference actual engineer names, repo names, labels, headlines, and filing dates.
+Be specific and data-driven. Reference actual signal sources, dollar amounts, board dates, and job titles.
 Format your response as JSON with this exact structure:
 {
-  "summary": "2-3 sentence executive summary of the technology signals",
+  "summary": "2-3 sentence executive summary of the procurement signals",
   "key_themes": ["theme1", "theme2", "theme3"],
   "opportunities": [
-    {"title": "Opportunity title", "detail": "Why Relevantz should engage on this"}
+    {"title": "Opportunity title", "detail": "Why this is a sales opportunity and what to pitch"}
   ],
   "friction_signals": ["signal1", "signal2"],
-  "recommended_action": "Specific next step for the sales team",
+  "recommended_action": "Specific next step for the EdTech sales team",
   "urgency": "high|medium|low",
   "tech_stack_signals": ["tech1", "tech2", "tech3"],
   "prescient_calls": [
     {
-      "call": "Bold forward-looking prediction (what is about to happen)",
+      "call": "Bold forward-looking prediction of what this district is about to procure",
       "confidence": "high|medium|low",
       "evidence": "2-3 specific signals that support this call"
     }
@@ -73,13 +66,11 @@ Format your response as JSON with this exact structure:
 
 
 def _format_signal(s: dict) -> str:
-    sig_type = s["signal_type"].upper()
-    eng      = s.get("engineer_username", "")
-    repo     = s.get("repo_name", "")
-    lang     = s.get("repo_language", "") or ""
-    desc     = (s.get("repo_description", "") or "")[:120]
-    topics   = s.get("repo_topics", []) or []
-    raw      = s.get("raw_data") or {}
+    sig_type  = s["signal_type"].upper()
+    source    = s.get("engineer_username", "")
+    repo      = s.get("repo_name", "")
+    desc      = (s.get("repo_description", "") or "")[:120]
+    raw       = s.get("raw_data") or {}
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -89,54 +80,32 @@ def _format_signal(s: dict) -> str:
     certainty = raw.get("certainty", "evaluating").upper()
     type_tag  = f"{sig_type}|{certainty}"
 
-    if sig_type == "ISSUE_COMMENT":
-        labels = ", ".join(raw.get("labels", []))
-        preview = (raw.get("comment_preview", "") or "")[:80]
-        return f"- [{type_tag}] {eng} → {repo} (issue: \"{raw.get('issue_title','')[:80]}\" labels: {labels}) \"{preview}\""
+    if sig_type == "BOARD_MINUTES_ITEM":
+        sub       = raw.get("signal_subtype", "")
+        vendor    = raw.get("vendor_name") or ""
+        dollar    = raw.get("dollar_amount") or ""
+        vendor_str = f" vendor={vendor}" if vendor else ""
+        dollar_str = f" amount={dollar}" if dollar else ""
+        return f"- [{type_tag}] {repo} → \"{desc}\"{vendor_str}{dollar_str}"
 
-    if sig_type in ("RELEASE",):
-        tag  = raw.get("tag", "")
-        name = raw.get("release_name", "")
-        pre  = " [PRERELEASE]" if raw.get("prerelease") else ""
-        body = (raw.get("body_preview", "") or "")[:80]
-        return f"- [{type_tag}] {eng} → {repo} ({tag} {name}){pre} \"{body}\""
+    if sig_type == "ESSA_PROFILE":
+        enroll = raw.get("enrollment", "")
+        return f"- [{type_tag}] NCES {raw.get('nces_id','')} enrollment={enroll}"
 
-    if sig_type == "ORG_ISSUE":
-        labels = ", ".join(raw.get("labels", []))
-        body   = (raw.get("body_preview", "") or "")[:80]
-        return f"- [{type_tag}] {eng} → {repo} issue#{raw.get('issue_number','')} \"{raw.get('issue_title','')[:80]}\" [{labels}] \"{body}\""
+    if sig_type == "STATE_INITIATIVE":
+        state = raw.get("state", source)
+        return f"- [{type_tag}] {state} DOE → \"{desc}\""
 
-    if sig_type == "HN_MENTION":
-        pts     = raw.get("points", 0)
-        cmts    = raw.get("num_comments", 0)
-        preview = (raw.get("text_preview", "") or "")[:80]
-        return f"- [{type_tag}] {eng} → \"{desc}\" ({pts}pts, {cmts} comments) \"{preview}\""
+    if sig_type == "JOB_POSTING":
+        return f"- [{type_tag}] {source} → job: \"{raw.get('job_title', desc)}\""
 
     if sig_type in ("NEWS_MENTION", "PRESS_RELEASE"):
         category = raw.get("news_category", "general").upper()
-        source   = raw.get("source", repo)
+        src_name = raw.get("source", repo)
         headline = (raw.get("headline", desc) or desc)[:120]
-        return f"- [{type_tag}|{category}] {source} → \"{headline}\""
+        return f"- [{type_tag}|{category}] {src_name} → \"{headline}\""
 
-    if sig_type == "SEC_FILING":
-        form     = raw.get("form_type", "8-K")
-        company  = raw.get("company", eng)
-        filed    = raw.get("filed_date", "")
-        return f"- [{type_tag}] {company} filed {form} with SEC on {filed}"
-
-    if sig_type == "REDDIT_BUZZ":
-        subreddit = raw.get("subreddit", "")
-        score_val = raw.get("score", 0)
-        cmts      = raw.get("num_comments", 0)
-        category  = raw.get("news_category", "general").upper()
-        headline  = (raw.get("headline", desc) or desc)[:120]
-        return f"- [{type_tag}|{category}] r/{subreddit} ({score_val}pts, {cmts} comments) \"{headline}\""
-
-    topics_str = ", ".join(topics[:5])
-    return (
-        f"- [{type_tag}] {eng} → {repo} ({lang}) {desc} "
-        f"{'[topics: ' + topics_str + ']' if topics_str else ''}"
-    )
+    return f"- [{type_tag}] {source} → {repo}: {desc}"
 
 
 async def generate_briefing(account_id: int) -> dict:
@@ -147,11 +116,11 @@ async def generate_briefing(account_id: int) -> dict:
     signals = await db.get_signals(account_id, limit=300, per_engineer=40)
     if not signals:
         return {
-            "summary": "No GitHub signals collected yet. Run a sync to gather data.",
+            "summary": "No district signals collected yet. Run a Scan to gather data.",
             "key_themes": [],
             "opportunities": [],
             "friction_signals": [],
-            "recommended_action": "Sync account to collect GitHub signals first.",
+            "recommended_action": "Scan the district to collect procurement signals first.",
             "urgency": "low",
             "tech_stack_signals": [],
             "prescient_calls": []
@@ -160,21 +129,23 @@ async def generate_briefing(account_id: int) -> dict:
     signal_lines = [_format_signal(s) for s in signals[:80]]
     signal_text  = "\n".join(signal_lines)
 
-    prompt = f"""Analyze these signals from engineers at {account['name']} and generate a prescient sales intelligence briefing.
+    prompt = f"""Analyze these procurement signals from {account['name']} and generate a prescient EdTech sales intelligence briefing.
 
-Company: {account['name']}
-GitHub Org: {account.get('github_org', 'N/A')}
+District: {account['name']}
+District Domain: {account.get('district_domain', 'N/A')}
+NCES ID: {account.get('nces_id', 'N/A')}
+District Legal Name: {account.get('district_legal_name', 'N/A')}
 Account Type: {account.get('account_type', 'prospect')}
 Signal Score: {account.get('signal_score', 0)}/100
 Total Signals: {len(signals)}
 
-SIGNALS (last 30 days):
+SIGNALS (last 60 days):
 {signal_text}
 
-Generate the briefing JSON now. Be bold in your prescient_calls — make the call before they announce it."""
+Generate the briefing JSON now. Be bold in your prescient_calls — call the procurement before the RFP drops."""
 
     response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-3-5-sonnet-20241022",
         max_tokens=2000,
         system=BRIEFING_SYSTEM,
         messages=[{"role": "user", "content": prompt}]

@@ -63,7 +63,7 @@ html, body, #root {
   align-items: center;
   justify-content: space-between;
   padding: 0 22px;
-  height: 52px;
+  height: 90px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 4px rgba(0,0,0,0.05);
@@ -71,7 +71,7 @@ html, body, #root {
 }
 .gp-logo { display: flex; align-items: center; gap: 10px; }
 .gp-logo-mark {
-  width: 200px; height: 200px;
+  height: 100px; width: auto;
   object-fit: contain;
   display: block;
 }

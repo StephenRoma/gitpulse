@@ -12,6 +12,9 @@ from dotenv import load_dotenv
 import database as db
 import ingest as ingester
 import brief as briefer
+import rfp_search
+import conference_intel
+import texas_screener
 
 load_dotenv()
 
@@ -20,7 +23,7 @@ async def lifespan(app: FastAPI):
     await db.init_db()
     yield
 
-app = FastAPI(title="GitPulse API", lifespan=lifespan)
+app = FastAPI(title="Quorum API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,14 +45,17 @@ report_status: dict[int, dict] = {}
 # ── Pydantic models ──────────────────────────────────────────────────────────
 class CreateAccountRequest(BaseModel):
     name: str
-    github_org: Optional[str] = ""
+    district_domain: Optional[str] = ""
     account_type: str = "prospect"
-    engineers: list[str] = []
-    ticker_symbol: Optional[str] = None
-    news_name: Optional[str] = None
+    nces_id: Optional[str] = None
+    district_legal_name: Optional[str] = None
 
-class AddEngineerRequest(BaseModel):
-    username: str
+class AddContactRequest(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    email: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    phone: Optional[str] = None
 
 class ChatRequest(BaseModel):
     message: str
@@ -57,10 +63,10 @@ class ChatRequest(BaseModel):
 
 class UpdateAccountRequest(BaseModel):
     name: Optional[str] = None
-    github_org: Optional[str] = None
+    district_domain: Optional[str] = None
     account_type: Optional[str] = None
-    ticker_symbol: Optional[str] = None
-    news_name: Optional[str] = None
+    nces_id: Optional[str] = None
+    district_legal_name: Optional[str] = None
 
 class CreateTeamRequest(BaseModel):
     name: str
@@ -90,11 +96,10 @@ async def list_accounts():
 async def create_account(req: CreateAccountRequest):
     account_id = await db.create_account(
         name=req.name,
-        github_org=req.github_org,
+        district_domain=req.district_domain,
         account_type=req.account_type,
-        engineers=req.engineers,
-        ticker_symbol=req.ticker_symbol,
-        news_name=req.news_name,
+        nces_id=req.nces_id,
+        district_legal_name=req.district_legal_name,
     )
     return {"id": account_id, "message": "Account created"}
 
@@ -113,34 +118,56 @@ async def get_account(account_id: int):
 @app.patch("/accounts/{account_id}")
 async def update_account(account_id: int, req: UpdateAccountRequest):
     account = await db.update_account(
-        account_id, name=req.name, github_org=req.github_org, account_type=req.account_type,
-        ticker_symbol=req.ticker_symbol, news_name=req.news_name,
+        account_id, name=req.name, district_domain=req.district_domain,
+        account_type=req.account_type, nces_id=req.nces_id,
+        district_legal_name=req.district_legal_name,
     )
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     return account
 
-# ── Engineers ─────────────────────────────────────────────────────────────────
+# ── Contacts ─────────────────────────────────────────────────────────────────
 @app.get("/accounts/{account_id}/engineers")
-async def get_engineers(account_id: int):
-    return await db.get_engineers(account_id)
+async def get_contacts_compat(account_id: int):
+    return await db.get_contacts(account_id)
 
-@app.post("/accounts/{account_id}/engineers")
-async def add_engineer(account_id: int, req: AddEngineerRequest):
-    await db.add_engineer_to_account(account_id, req.username)
-    engineers = await db.get_engineers(account_id)
-    match = next((e for e in engineers if e["github_username"] == req.username), None)
-    return match or {"github_username": req.username}
+@app.get("/accounts/{account_id}/contacts")
+async def get_contacts(account_id: int):
+    return await db.get_contacts(account_id)
 
-@app.delete("/engineers/{engineer_id}")
-async def remove_engineer(engineer_id: int):
-    await db.remove_engineer(engineer_id)
-    return {"message": "Engineer removed"}
+@app.post("/accounts/{account_id}/contacts")
+async def add_contact(account_id: int, req: AddContactRequest):
+    contact_id = await db.add_contact(
+        account_id,
+        name=req.name,
+        role=req.role,
+        email=req.email,
+        linkedin_url=req.linkedin_url,
+        phone=req.phone,
+    )
+    contacts = await db.get_contacts(account_id)
+    match = next((c for c in contacts if c["id"] == contact_id), None)
+    return match or {"id": contact_id}
 
-@app.patch("/engineers/{engineer_id}")
-async def update_engineer(engineer_id: int, req: AssignTeamRequest):
-    await db.assign_engineer_team(engineer_id, req.team_id)
-    return {"message": "Engineer updated"}
+@app.delete("/engineers/{contact_id}")
+async def remove_contact_compat(contact_id: int):
+    await db.remove_contact(contact_id)
+    return {"message": "Contact removed"}
+
+@app.delete("/contacts/{contact_id}")
+async def remove_contact(contact_id: int):
+    await db.remove_contact(contact_id)
+    return {"message": "Contact removed"}
+
+@app.patch("/engineers/{contact_id}")
+async def assign_contact_team_compat(contact_id: int, req: AssignTeamRequest):
+    await db.assign_contact_team(contact_id, req.team_id)
+    return {"message": "Contact updated"}
+
+@app.patch("/contacts/{contact_id}")
+async def assign_contact_team(contact_id: int, req: AssignTeamRequest):
+    await db.assign_contact_team(contact_id, req.team_id)
+    return {"message": "Contact updated"}
 
 # ── Teams ───────────────────────────────────────────────────────────────────
 @app.get("/accounts/{account_id}/teams")
@@ -190,30 +217,23 @@ async def untag_signal(signal_id: int, theme: str):
 # ── Reports ────────────────────────────────────────────────────────────────
 # Auto-group signals by type when no manual tags exist
 SIGNAL_TYPE_TO_THEME = {
-    "release":       "platform_eng",
-    "new_repo":      "platform_eng",
-    "push":          "platform_eng",
-    "org_issue":     "tech_debt",
-    "issue_comment": "tech_debt",
-    "star":          "vendor_eval",
-    "fork":          "vendor_eval",
-    "hn_mention":    "vendor_eval",
-    "news_mention":  "modernization",
-    "press_release": "modernization",
-    "sec_filing":    "modernization",
-    "reddit_buzz":   "vendor_eval",
+    "board_minutes_item": "governance",
+    "essa_profile":       "district_profile",
+    "state_initiative":   "policy",
+    "job_posting":        "procurement_signal",
+    "news_mention":       "public_perception",
+    "press_release":      "public_perception",
 }
 
 THEME_LABELS = {
-    "modernization":   "Modernization",
-    "cloud_migration": "Cloud Migration",
-    "ai_adoption":     "AI / ML Adoption",
-    "security":        "Security & Compliance",
-    "platform_eng":    "Platform Engineering",
-    "vendor_eval":     "Vendor Evaluation",
-    "tech_debt":       "Tech Debt",
-    "performance":     "Performance",
-    "devex":           "Developer Experience",
+    "governance":         "Board Governance",
+    "district_profile":   "District Profile",
+    "policy":             "State Policy & Mandates",
+    "procurement_signal": "Active Procurement Signals",
+    "public_perception":  "Public Perception & News",
+    "tech_initiative":    "Technology Initiative",
+    "budget":             "Budget & Finance",
+    "esser":              "ESSER / Federal Funding",
 }
 
 @app.get("/accounts/{account_id}/report")
@@ -299,13 +319,13 @@ async def _do_generate_report(account_id: int, account: dict, key: str):
         theme_blocks.append(f"THEME KEY: {theme}\nTHEME LABEL: {label}\n" + "\n".join(lines))
 
     prompt = (
-        f"You are writing a sales intelligence report for Relevantz about {account['name']}.\n"
+        f"You are writing an EdTech sales intelligence report for {account['name']}.\n"
         f"Account type: {account.get('account_type','prospect')} | Signal score: {account.get('signal_score',0)}/100\n\n"
-        f"The sales team has tagged GitHub signals into strategic themes. "
+        f"The sales team has tagged district procurement signals into strategic themes. "
         f"For each theme below, write a 2-3 sentence narrative that:\n"
-        f"1. States what pattern the signals reveal\n"
-        f"2. Explains the business implication or pain point\n"
-        f"3. Suggests a specific Relevantz angle to open a conversation\n\n"
+        f"1. States what pattern the signals reveal about this district\n"
+        f"2. Explains the procurement implication or pain point\n"
+        f"3. Suggests a specific sales angle to open a conversation\n\n"
         + "\n\n".join(theme_blocks)
         + "\n\nReturn a JSON array (no markdown fences) with one object per theme.\n"
         "Use the exact THEME KEY value in each object:\n"
@@ -315,7 +335,7 @@ async def _do_generate_report(account_id: int, account: dict, key: str):
     from anthropic import AsyncAnthropic
     client = AsyncAnthropic(api_key=key)
     response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-3-5-sonnet-20241022",
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -339,7 +359,7 @@ async def _do_generate_report(account_id: int, account: dict, key: str):
     report_content = {
         "account": {
             "name": account["name"],
-            "github_org": account.get("github_org", ""),
+            "district_domain": account.get("district_domain", ""),
             "account_type": account.get("account_type", "prospect"),
             "signal_score": account.get("signal_score", 0),
         },
@@ -379,15 +399,15 @@ async def generate_briefing(account_id: int, background_tasks: BackgroundTasks):
 @app.post("/accounts/{account_id}/sync")
 async def sync_account(account_id: int, background_tasks: BackgroundTasks):
     async def _sync():
-        set_syncing(account_id, "syncing", "Collecting GitHub signals...")
+        set_syncing(account_id, "syncing", "Scanning district signals...")
         try:
             result = await ingester.ingest_account(account_id)
             set_syncing(account_id, "briefing", "Generating AI briefing...")
             await briefer.generate_briefing(account_id)
-            set_syncing(account_id, "done", f"Synced {result['signals']} signals")
+            set_syncing(account_id, "done", f"Scanned {result['signals']} signals")
         except Exception as e:
             set_syncing(account_id, "error", str(e))
-            print(f"Sync error for account {account_id}: {e}")
+            print(f"Scan error for account {account_id}: {e}")
 
     background_tasks.add_task(_sync)
     return {"message": "Sync started"}
@@ -415,69 +435,15 @@ async def sync_all(background_tasks: BackgroundTasks):
     background_tasks.add_task(_sync_all)
     return {"message": f"Syncing {len(accounts)} accounts"}
 
-# ── Org member import ───────────────────────────────────────────────────────
+# ── Scan District (replaces import-org-members) ─────────────────────────────
 @app.post("/accounts/{account_id}/import-org-members")
-async def import_org_members(account_id: int):
-    from github import Github, GithubException
+async def scan_district_contacts(account_id: int):
     account = await db.get_account(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    org_name = account.get("github_org", "").strip()
-    if not org_name:
-        raise HTTPException(status_code=400, detail="Account has no GitHub org configured. Edit the account and set an org name.")
-    token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured")
-    try:
-        g = Github(token)
-        org = g.get_organization(org_name)
-        # Scan top 20 most-recently-pushed public repos for contributors
-        contributor_counts: dict[str, int] = {}
-        repos = sorted(org.get_repos(type="public"), key=lambda r: r.pushed_at or r.created_at, reverse=True)[:20]
-        for repo in repos:
-            try:
-                for contributor in repo.get_contributors():
-                    login = contributor.login
-                    contributor_counts[login] = contributor_counts.get(login, 0) + contributor.contributions
-            except GithubException:
-                continue  # some repos block contributor access
-        # Also sweep org members in case they haven't committed to public repos
-        try:
-            for member in org.get_members():
-                if member.login not in contributor_counts:
-                    contributor_counts[member.login] = 0
-        except GithubException:
-            pass  # org member list may be hidden
-        # Sort by total contributions descending, cap at 10
-        logins = sorted(contributor_counts, key=lambda l: contributor_counts[l], reverse=True)[:10]
-    except GithubException as e:
-        msg = e.data.get("message", str(e)) if hasattr(e, "data") and isinstance(e.data, dict) else str(e)
-        raise HTTPException(status_code=400, detail=f"GitHub error: {msg}")
-    added = 0
-    existing = {eng["github_username"] for eng in await db.get_engineers(account_id)}
-    for login in logins:
-        if login not in existing:
-            await db.add_engineer_to_account(account_id, login)
-            added += 1
-            # Enrich company from GitHub profile
-            try:
-                user_obj = g.get_user(login)
-                company_raw = user_obj.company or ''
-                company = company_raw.lstrip('@').strip() or None
-                if company:
-                    await db.upsert_engineer(account_id, login, company=company)
-            except Exception:
-                pass
-    # Suggest teams based on distinct company values not yet mapped to a team
-    all_engineers = await db.get_engineers(account_id)
-    existing_teams = {t['name'].lower() for t in await db.get_teams(account_id)}
-    companies = set()
-    for eng in all_engineers:
-        c = eng.get('company')
-        if c and c.lower() not in existing_teams:
-            companies.add(c)
-    skipped = len(logins) - added
-    return {"added": added, "skipped": skipped, "total": len(logins), "suggested_teams": sorted(companies)}
+    # Contacts must be added manually in Quorum via the Add Contact form
+    contacts = await db.get_contacts(account_id)
+    return {"added": 0, "skipped": 0, "total": len(contacts), "suggested_teams": []}
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 @app.post("/accounts/{account_id}/chat")
@@ -489,14 +455,15 @@ async def chat_with_signals(account_id: int, req: ChatRequest):
     if not key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
     signals = await db.get_signals(account_id, limit=200)
-    engineers = await db.get_engineers(account_id)
+    contacts = await db.get_contacts(account_id)
     briefing_row = await db.get_latest_briefing(account_id)
     signal_lines = []
     for s in signals[:100]:
-        lang = s.get("repo_language", "") or ""
         desc = (s.get("repo_description", "") or "")[:80]
-        signal_lines.append(f"- [{s['signal_type'].upper()}] {s.get('engineer_username','')} → {s['repo_name']} ({lang}): {desc}")
-    eng_list = ", ".join(e["github_username"] for e in engineers[:20])
+        signal_lines.append(f"- [{s['signal_type'].upper()}] {s.get('engineer_username','')} → {s['repo_name']}: {desc}")
+    contact_list = ", ".join(
+        f"{c.get('name','?')} ({c.get('role','')})" for c in contacts[:20]
+    )
     briefing_text = "No briefing generated yet."
     if briefing_row:
         try:
@@ -505,14 +472,15 @@ async def chat_with_signals(account_id: int, req: ChatRequest):
         except Exception:
             briefing_text = str(briefing_row.get("content", ""))
     system = (
-        f"You are a sales intelligence assistant analyzing GitHub activity for "
-        f"{account.get('name', 'this account')} (GitHub org: {account.get('github_org', 'unknown')}).\n\n"
-        f"TRACKED ENGINEERS: {eng_list or 'None yet'}\n\n"
-        f"RECENT GITHUB SIGNALS ({len(signals)} total):\n"
-        + ("\n".join(signal_lines) if signal_lines else "No signals collected yet. Suggest running a sync.")
+        f"You are an EdTech sales intelligence assistant analyzing procurement signals for "
+        f"{account.get('name', 'this district')} (District domain: {account.get('district_domain', 'unknown')}).\n\n"
+        f"TRACKED CONTACTS: {contact_list or 'None yet'}\n\n"
+        f"RECENT DISTRICT SIGNALS ({len(signals)} total):\n"
+        + ("\n".join(signal_lines) if signal_lines else "No signals collected yet. Suggest running a scan.")
         + f"\n\nBRIEFING SUMMARY:\n{briefing_text}\n\n"
-        "Help the user understand, question, or refine this intelligence. Be concise and sales-focused. "
-        "Reference actual engineers and repos when relevant. Keep responses under 200 words unless asked for more. "
+        "Help the user understand, question, or refine this EdTech procurement intelligence. "
+        "Be concise and sales-focused. Reference actual signal sources and contact names when relevant. "
+        "Keep responses under 200 words unless asked for more. "
         "Format your responses with plain section headers (no # symbols, no asterisks), numbered or bulleted lists using hyphens. "
         "Never use markdown bold (**text**) or italic (*text*) — use plain text only."
     )
@@ -521,7 +489,7 @@ async def chat_with_signals(account_id: int, req: ChatRequest):
     messages = [{"role": m["role"], "content": m["content"]} for m in req.history]
     messages.append({"role": "user", "content": req.message})
     response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-3-5-sonnet-20241022",
         max_tokens=600,
         system=system,
         messages=messages,
@@ -536,3 +504,349 @@ async def health():
         "github_token": bool(os.getenv("GITHUB_TOKEN")),
         "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY"))
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RFP FINDER
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DraftProposalRequest(BaseModel):
+    vendor_name: str
+    vendor_description: str
+
+@app.get("/rfps")
+async def list_rfps(account_id: Optional[int] = None):
+    return await db.get_rfps(account_id)
+
+@app.post("/accounts/{account_id}/rfps/scan")
+async def scan_rfps(account_id: int, background_tasks: BackgroundTasks):
+    account = await db.get_account(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    background_tasks.add_task(_run_rfp_scan, account_id)
+    return {"status": "scanning"}
+
+async def _run_rfp_scan(account_id: int):
+    try:
+        added = await rfp_search.scan_rfps_for_account(account_id)
+        print(f"[rfp_scan] Added {added} RFPs for account {account_id}")
+    except Exception as e:
+        print(f"[rfp_scan] Error: {e}")
+
+@app.post("/rfps/{rfp_id}/draft")
+async def draft_rfp_proposal(rfp_id: int, req: DraftProposalRequest):
+    try:
+        draft = await rfp_search.draft_proposal(rfp_id, req.vendor_name, req.vendor_description)
+        return {"draft": draft}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/rfps/{rfp_id}")
+async def delete_rfp(rfp_id: int):
+    await db.delete_rfp(rfp_id)
+    return {"deleted": rfp_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFERENCE INTELLIGENCE
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/conferences")
+async def list_conferences(upcoming: bool = True):
+    confs = await db.get_conferences(upcoming_only=upcoming)
+    if not confs:
+        # Auto-seed on first call
+        await conference_intel.seed_conferences()
+        confs = await db.get_conferences(upcoming_only=upcoming)
+    return confs
+
+@app.post("/conferences/seed")
+async def seed_conferences():
+    count = await conference_intel.seed_conferences()
+    return {"seeded": count}
+
+@app.get("/conferences/relevance/{account_id}")
+async def conferences_for_account(account_id: int):
+    account = await db.get_account(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    confs = await db.get_conferences(upcoming_only=True)
+    if not confs:
+        await conference_intel.seed_conferences()
+        confs = await db.get_conferences(upcoming_only=True)
+    scored = []
+    for c in confs:
+        c["relevance_score"] = conference_intel.score_conference_relevance(c, account)
+        c["days_until"] = conference_intel.days_until(c.get("start_date"))
+        scored.append(c)
+    scored.sort(key=lambda x: (-x["relevance_score"], x.get("start_date") or ""))
+    return scored
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PUBLIC SPEND INTELLIGENCE
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/accounts/{account_id}/spend")
+async def get_spend(account_id: int):
+    rows = await db.get_spend_intel(account_id)
+    return rows
+
+@app.post("/accounts/{account_id}/spend/scan")
+async def scan_spend(account_id: int, background_tasks: BackgroundTasks):
+    account = await db.get_account(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    background_tasks.add_task(_run_spend_scan, account_id)
+    return {"status": "scanning"}
+
+async def _run_spend_scan(account_id: int):
+    """Query USASpending.gov for grants/awards to this district."""
+    import httpx
+    account = await db.get_account(account_id)
+    if not account:
+        return
+    name = account.get("district_legal_name") or account.get("name", "")
+    if not name:
+        return
+    await db.clear_spend_intel(account_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEXAS DISTRICT SCREENER
+# ─────────────────────────────────────────────────────────────────────────────
+
+# In-memory scan and report status for Texas screener
+texas_scan_status: dict[int, dict]  = {}   # keyed by ESC region number
+texas_report_status: dict[str, dict] = {}  # keyed by district_id
+texas_client_report_status: dict[str, dict] = {}  # keyed by district_id
+
+
+@app.get("/texas/regions")
+async def list_texas_regions():
+    """Returns the 20 ESC regions with names and cities."""
+    return [
+        {"region": region, **meta}
+        for region, meta in texas_screener.ESC_REGIONS.items()
+    ]
+
+
+@app.get("/texas/districts")
+async def list_texas_districts(region: int):
+    """Returns all scanned districts for a given ESC region, scored and sorted."""
+    districts = await db.get_texas_districts_by_region(region)
+    return districts
+
+
+@app.get("/texas/districts/{district_id}")
+async def get_texas_district(district_id: str):
+    district = await db.get_texas_district(district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+    return district
+
+
+@app.post("/texas/scan/{region}")
+async def scan_texas_region(region: int, background_tasks: BackgroundTasks):
+    if region not in texas_screener.ESC_REGIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid ESC region: {region}")
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    texas_scan_status[region] = {"status": "starting", "detail": "Initializing scan...", "progress": 0}
+
+    async def _scan():
+        async def _progress(status: str, detail: str):
+            texas_scan_status[region] = {"status": status, "detail": detail}
+
+        try:
+            result = await texas_screener.scan_region(region, progress_cb=_progress)
+            texas_scan_status[region] = {
+                "status": "done",
+                "detail": result.get("detail", f"Scanned {result['total']} districts"),
+                "total": result["total"],
+                "troubled": result["troubled"],
+                "accounts_created": result["accounts_created"],
+            }
+        except Exception as e:
+            texas_scan_status[region] = {"status": "error", "detail": str(e)}
+            print(f"[TX scan] Region {region} error: {e}")
+
+    background_tasks.add_task(_scan)
+    return {"message": f"Scan started for ESC Region {region}"}
+
+
+@app.get("/texas/scan/{region}/status")
+async def get_texas_scan_status(region: int):
+    return texas_scan_status.get(region, {"status": "idle"})
+
+
+@app.post("/texas/districts/{district_id}/report/generate")
+async def generate_texas_report(district_id: str, background_tasks: BackgroundTasks):
+    district = await db.get_texas_district(district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    texas_report_status[district_id] = {"status": "generating", "detail": "Claude is writing your pitch..."}
+
+    async def _generate():
+        try:
+            pitch = await texas_screener.generate_babbage_pitch(district)
+            await db.update_texas_district_pitch(district_id, json.dumps(pitch))
+            texas_report_status[district_id] = {"status": "done"}
+        except Exception as e:
+            texas_report_status[district_id] = {"status": "error", "detail": str(e)}
+            print(f"[TX report] District {district_id} error: {e}")
+
+    background_tasks.add_task(_generate)
+    return {"message": "Report generation started"}
+
+
+@app.get("/texas/districts/{district_id}/report/status")
+async def get_texas_report_status(district_id: str):
+    return texas_report_status.get(district_id, {"status": "idle"})
+
+
+@app.post("/texas/districts/{district_id}/client-report/generate")
+async def generate_texas_client_report(district_id: str, background_tasks: BackgroundTasks):
+    district = await db.get_texas_district(district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+    key = os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    texas_client_report_status[district_id] = {"status": "generating", "detail": "Claude is writing your client proposal..."}
+
+    async def _generate():
+        try:
+            report = await texas_screener.generate_client_report(district)
+            await db.update_texas_district_client_report(district_id, json.dumps(report))
+            texas_client_report_status[district_id] = {"status": "done"}
+        except Exception as e:
+            texas_client_report_status[district_id] = {"status": "error", "detail": str(e)}
+            print(f"[TX client report] District {district_id} error: {e}")
+
+    background_tasks.add_task(_generate)
+    return {"message": "Client report generation started"}
+
+
+@app.get("/texas/districts/{district_id}/client-report/status")
+async def get_texas_client_report_status(district_id: str):
+    return texas_client_report_status.get(district_id, {"status": "idle"})
+
+
+@app.post("/texas/districts/{district_id}/pipeline")
+async def add_texas_district_to_pipeline(district_id: str):
+    district = await db.get_texas_district(district_id)
+    if not district:
+        raise HTTPException(status_code=404, detail="District not found")
+    if district.get("account_id"):
+        return {"account_id": district["account_id"], "created": False}
+    account_id = await db.create_account(
+        name=district["district_name"],
+        district_domain=None,
+        account_type="prospect",
+        nces_id=district_id,
+        district_legal_name=district["district_name"],
+    )
+    await db.link_texas_district_account(district_id, account_id)
+    return {"account_id": account_id, "created": True}
+
+
+    try:
+        payload = {
+            "filters": {
+                "recipient_search_text": [name],
+                "award_type_codes": ["02", "03", "04", "05", "A", "B", "C", "D"],
+                "time_period": [{"start_date": "2020-01-01", "end_date": "2026-12-31"}],
+            },
+            "fields": ["Recipient Name", "Award Amount", "Award Type",
+                       "Awarding Agency", "CFDA Number", "CFDA Title",
+                       "Period of Performance Start Date"],
+            "page": 1, "limit": 50, "sort": "Award Amount", "order": "desc",
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+                json=payload,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                for award in (data.get("results") or []):
+                    raw = award.get("generated_internal_id") and award
+                    amount = award.get("Award Amount") or 0
+                    try:
+                        amount = int(float(str(amount).replace(",", "")))
+                    except Exception:
+                        amount = 0
+                    start = (award.get("Period of Performance Start Date") or "")[:4]
+                    year = int(start) if start.isdigit() else 0
+                    await db.save_spend_award(
+                        account_id=account_id,
+                        vendor=award.get("Awarding Agency", "Unknown Agency"),
+                        amount=amount,
+                        year=year,
+                        program=award.get("CFDA Title", ""),
+                        cfda=award.get("CFDA Number", ""),
+                        award_type=award.get("Award Type", ""),
+                        data_source="usaspending",
+                    )
+        print(f"[spend_scan] Done for account {account_id}")
+    except Exception as e:
+        print(f"[spend_scan] Error: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTACT ENRICHMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EnrichContactRequest(BaseModel):
+    hint: Optional[str] = None  # any extra context (LinkedIn URL, company, etc.)
+
+@app.post("/contacts/{contact_id}/enrich")
+async def enrich_contact(contact_id: int, req: EnrichContactRequest):
+    """Use Claude to suggest enrichment for a contact based on their name/role/district."""
+    import os
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+
+    async with __import__("aiosqlite").connect(db.DB_PATH) as conn:
+        conn.row_factory = __import__("aiosqlite").Row
+        async with conn.execute(
+            "SELECT c.*, a.name as account_name, a.district_domain, a.district_legal_name "
+            "FROM contacts c JOIN accounts a ON a.id=c.account_id WHERE c.id=?",
+            (contact_id,)
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Contact not found")
+    contact = dict(row)
+
+    prompt = f"""Contact:
+Name: {contact.get('name', 'Unknown')}
+Role: {contact.get('role', 'Unknown')}
+District: {contact.get('account_name', '')} ({contact.get('district_domain', '')})
+{f"Hint: {req.hint}" if req.hint else ""}
+
+Based on this person's name, role, and district, suggest:
+1. Their likely LinkedIn URL format (e.g. linkedin.com/in/firstname-lastname-districtabbrev)
+2. Likely email format (most districts use firstname.lastname@domain.org or flastname@domain.org)
+3. 2-3 key talking points for an EdTech vendor reaching out to them
+4. Best time of year to reach out (avoid testing periods, budget freeze, etc.)
+
+Keep the response concise and structured."""
+
+    message = await client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return {"suggestions": message.content[0].text, "contact": contact}
+

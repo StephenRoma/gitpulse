@@ -1,9 +1,9 @@
 ﻿import { useState, useRef, useEffect } from 'react'
 import { Spinner } from '@blueprintjs/core'
 
-const SIGNAL_ICONS   = { star: '\u2605', fork: '\u2482', new_repo: '\u25C8', push: '\u2191', issue_comment: '\uD83D\uDCAC', release: '\uD83C\uDFF7', org_issue: '\u26A0', hn_mention: '\u25CE', news_mention: '\uD83D\uDCF0', press_release: '\uD83D\uDCE3', sec_filing: '\uD83C\uDFDB', reddit_buzz: '\u2B06' }
-const SIGNAL_ACTIONS = { star: 'starred', fork: 'forked', new_repo: 'created repo', push: 'pushed to', issue_comment: 'commented on issue in', release: 'published release', org_issue: 'open issue on', hn_mention: 'mentioned on HN', news_mention: 'in the news', press_release: 'press release', sec_filing: 'filed 8-K with SEC', reddit_buzz: 'discussed on Reddit' }
-const TYPE_LABELS    = { star: 'Star', fork: 'Fork', new_repo: 'New Repo', push: 'Push', issue_comment: 'Issue Comment', release: 'Release', org_issue: 'Org Issue', hn_mention: 'HN Mention', news_mention: 'News', press_release: 'Press Release', sec_filing: 'SEC 8-K', reddit_buzz: 'Reddit' }
+const SIGNAL_ICONS   = { board_minutes_item: '📋', essa_profile: '📊', state_initiative: '🏛', job_posting: '💼', news_mention: '📰', press_release: '📣', star: '★', fork: '⑂', new_repo: '◈', push: '↑', issue_comment: '💬', release: '🏷', org_issue: '⚠', hn_mention: '◎', sec_filing: '🏛', reddit_buzz: '⬆' }
+const SIGNAL_ACTIONS = { board_minutes_item: 'board minutes item', essa_profile: 'ESSA profile updated', state_initiative: 'state initiative', job_posting: 'job posting', news_mention: 'in the news', press_release: 'press release', star: 'starred', fork: 'forked', new_repo: 'created repo', push: 'pushed to', issue_comment: 'commented on issue in', release: 'published release', org_issue: 'open issue on', hn_mention: 'mentioned on HN', sec_filing: 'filed 8-K with SEC', reddit_buzz: 'discussed on Reddit' }
+const TYPE_LABELS    = { board_minutes_item: 'Board Minutes', essa_profile: 'ESSA Profile', state_initiative: 'State Initiative', job_posting: 'Job Posting', news_mention: 'News', press_release: 'Press Release' }
 
 function sigScore(signal) {
   try { return JSON.parse(signal.raw_data || '{}').sig_score || 0 } catch { return 0 }
@@ -95,8 +95,8 @@ function TagPopover({ signalId, activeTags = [], onTag, onUntag, onClose }) {
   )
 }
 
-const ENGINEERING_TYPES = new Set(['star','fork','new_repo','push','issue_comment','release','org_issue','hn_mention'])
-const BUSINESS_TYPES    = new Set(['news_mention','press_release','sec_filing','reddit_buzz'])
+const BOARD_TYPES = new Set(['board_minutes_item','essa_profile','state_initiative'])
+const NEWS_TYPES  = new Set(['news_mention','press_release','job_posting'])
 
 const NEWS_CAT_COLORS = {
   risk:      { fg: '#991B1B', bg: '#FEF2F2', bd: '#FECACA' },
@@ -112,7 +112,7 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
   const [minScore,        setMinScore]        = useState(0)
   const [activeCertainty, setActiveCertainty] = useState(null)
   const [openTagId,       setOpenTagId]       = useState(null)
-  const [sourceFilter,    setSourceFilter]    = useState('all') // 'all' | 'engineering' | 'business'
+  const [sourceFilter,    setSourceFilter]    = useState('all') // 'all' | 'board' | 'news'
 
   if (loading) {
     return (
@@ -125,7 +125,7 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
   if (!signals?.length) {
     return (
       <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40, fontSize: 13, fontFamily: 'var(--mono)' }}>
-        No signals yet. Run a sync to collect GitHub activity.
+        No signals yet. Run a Scan to collect district signals.
       </div>
     )
   }
@@ -137,8 +137,8 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
     (!activeCertainty || sigCertainty(s) === activeCertainty) &&
     (sigScore(s) >= minScore) &&
     (sourceFilter === 'all' ||
-     (sourceFilter === 'engineering' && ENGINEERING_TYPES.has(s.signal_type)) ||
-     (sourceFilter === 'business'    && BUSINESS_TYPES.has(s.signal_type)))
+     (sourceFilter === 'board' && BOARD_TYPES.has(s.signal_type)) ||
+     (sourceFilter === 'news'  && NEWS_TYPES.has(s.signal_type)))
   )
   const filtersActive = activeHeat || activeType || activeEngineer || minScore > 0 || activeCertainty || sourceFilter !== 'all'
 
@@ -157,7 +157,7 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
         {/* Row 0: Source toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginRight: 2 }}>SOURCE</span>
-          {[['all','All'],['engineering','Engineering'],['business','Business']].map(([k,l]) => (
+          {[['all','All'],['board','Board & Gov'],['news','News & Jobs']].map(([k,l]) => (
             <span key={k} onClick={() => setSourceFilter(k)} style={{
               ...chipBase,
               color: sourceFilter === k ? 'var(--navy)' : 'var(--text-secondary)',
@@ -237,14 +237,14 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
         {/* Row 5: Engineer dropdown + clear */}
         {engineers.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginRight: 2 }}>ENG</span>
+            <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--mono)', marginRight: 2 }}>CONTACT</span>
             <select value={activeEngineer} onChange={e => setActiveEngineer(e.target.value)} style={{
               fontSize: 10, fontFamily: 'var(--mono)', border: '1px solid var(--border)',
               borderRadius: 4, padding: '2px 6px', background: 'var(--surface)', color: 'var(--navy)', cursor: 'pointer',
             }}>
-              <option value="">All Engineers</option>
+              <option value="">All Contacts</option>
               {engineers.map(eng => (
-                <option key={eng.id} value={eng.github_username}>{eng.github_username}</option>
+                <option key={eng.id} value={eng.name || eng.id}>{eng.name || eng.role || 'Contact'}</option>
               ))}
             </select>
             {filtersActive && (
@@ -394,7 +394,11 @@ export default function SignalFeed({ signals, loading, engineers = [], signalTag
               <div className="signal-heat-badge" style={{
                 color: heatFg(heat), background: heatBg(heat), borderColor: heatBd(heat),
               }}>{heat.toUpperCase()}</div>
-              <div className="signal-time">{timeAgo(s.detected_at)}</div>
+              <div className="signal-time" title={raw.pub_date ? `Published ${raw.pub_date} · Detected ${timeAgo(s.detected_at)}` : `Detected ${timeAgo(s.detected_at)}`}>
+                {raw.pub_date
+                  ? new Date(raw.pub_date + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+                  : timeAgo(s.detected_at)}
+              </div>
               {/* Tag button */}
               {onTagSignal && (
                 <div style={{ position: 'relative', flexShrink: 0 }}>

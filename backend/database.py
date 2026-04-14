@@ -3,26 +3,37 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "gitpulse.db"
+DB_PATH = Path(__file__).parent / "quorum.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    github_org TEXT,
+    district_domain TEXT,
+    nces_id TEXT,
+    district_legal_name TEXT,
+    avatar_url TEXT,
     account_type TEXT DEFAULT 'prospect',
     last_synced TEXT,
     signal_score INTEGER DEFAULT 0,
+    total_enrollment INTEGER,
+    title1_status TEXT,
+    per_pupil_expenditure INTEGER,
+    technology_spend INTEGER,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS engineers (
+CREATE TABLE IF NOT EXISTS contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-    github_username TEXT NOT NULL,
-    display_name TEXT,
+    name TEXT,
+    role TEXT,
+    email TEXT,
+    linkedin_url TEXT,
+    phone TEXT,
     avatar_url TEXT,
-    UNIQUE(account_id, github_username)
+    team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
+    UNIQUE(account_id, email)
 );
 
 CREATE TABLE IF NOT EXISTS signals (
@@ -70,33 +81,99 @@ CREATE TABLE IF NOT EXISTS reports (
     content TEXT,
     generated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS outreach_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    content TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rfps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    agency TEXT,
+    posted_date TEXT,
+    due_date TEXT,
+    url TEXT,
+    estimated_value INTEGER,
+    description TEXT,
+    naics_code TEXT,
+    source TEXT,
+    status TEXT DEFAULT 'open',
+    proposal_draft TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(account_id, url)
+);
+
+CREATE TABLE IF NOT EXISTS conferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    start_date TEXT,
+    end_date TEXT,
+    location TEXT,
+    city TEXT,
+    url TEXT,
+    theme_tags TEXT,
+    attendee_count INTEGER,
+    is_virtual INTEGER DEFAULT 0,
+    registration_open INTEGER DEFAULT 1,
+    notes TEXT,
+    UNIQUE(name, start_date)
+);
+
+CREATE TABLE IF NOT EXISTS spend_intel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    vendor TEXT,
+    amount INTEGER,
+    year INTEGER,
+    program TEXT,
+    cfda TEXT,
+    award_type TEXT,
+    data_source TEXT DEFAULT 'usaspending',
+    retrieved_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS texas_districts (
+    district_id TEXT PRIMARY KEY,
+    district_name TEXT NOT NULL,
+    esc_region INTEGER,
+    enrollment INTEGER,
+    accountability_rating TEXT,
+    staar_reading_pct REAL,
+    staar_math_pct REAL,
+    staar_sped_reading_pct REAL,
+    staar_sped_math_pct REAL,
+    grad_rate REAL,
+    teacher_turnover_pct REAL,
+    sped_student_pct REAL,
+    chronic_absent_pct REAL,
+    trouble_score INTEGER DEFAULT 0,
+    trouble_flags TEXT DEFAULT '[]',
+    babbage_pitch TEXT,
+    last_fetched TEXT,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL
+);
 """
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
         await db.commit()
-    # Migrate: create new tables and add columns if they don't exist yet
+    # Migrations for any pre-existing quorum.db
     for sql in [
-        """CREATE TABLE IF NOT EXISTS signal_tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            signal_id INTEGER REFERENCES signals(id) ON DELETE CASCADE,
-            account_id INTEGER NOT NULL,
-            theme TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            UNIQUE(signal_id, theme)
-        )""",
-        """CREATE TABLE IF NOT EXISTS reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-            content TEXT,
-            generated_at TEXT DEFAULT (datetime('now'))
-        )""",
-        "ALTER TABLE engineers ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL",
-        "ALTER TABLE engineers ADD COLUMN company TEXT",
-        "ALTER TABLE accounts ADD COLUMN ticker_symbol TEXT",
-        "ALTER TABLE accounts ADD COLUMN news_name TEXT",
+        "ALTER TABLE accounts ADD COLUMN district_domain TEXT",
+        "ALTER TABLE accounts ADD COLUMN nces_id TEXT",
+        "ALTER TABLE accounts ADD COLUMN district_legal_name TEXT",
         "ALTER TABLE accounts ADD COLUMN avatar_url TEXT",
+        "ALTER TABLE accounts ADD COLUMN total_enrollment INTEGER",
+        "ALTER TABLE accounts ADD COLUMN title1_status TEXT",
+        "ALTER TABLE accounts ADD COLUMN per_pupil_expenditure INTEGER",
+        "ALTER TABLE accounts ADD COLUMN technology_spend INTEGER",
+        "ALTER TABLE rfps ADD COLUMN proposal_draft TEXT",
+        "ALTER TABLE texas_districts ADD COLUMN client_report TEXT",
     ]:
         try:
             async with aiosqlite.connect(DB_PATH) as db:
@@ -105,15 +182,45 @@ async def init_db():
         except Exception:
             pass  # column already exists
 
+    # Ensure texas_districts table exists for pre-existing databases
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS texas_districts (
+                    district_id TEXT PRIMARY KEY,
+                    district_name TEXT NOT NULL,
+                    esc_region INTEGER,
+                    enrollment INTEGER,
+                    accountability_rating TEXT,
+                    staar_reading_pct REAL,
+                    staar_math_pct REAL,
+                    staar_sped_reading_pct REAL,
+                    staar_sped_math_pct REAL,
+                    grad_rate REAL,
+                    teacher_turnover_pct REAL,
+                    sped_student_pct REAL,
+                    chronic_absent_pct REAL,
+                    trouble_score INTEGER DEFAULT 0,
+                    trouble_flags TEXT DEFAULT '[]',
+                    babbage_pitch TEXT,
+                    last_fetched TEXT,
+                    account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL
+                )
+            """)
+            await db.commit()
+    except Exception:
+        pass
+
+
 async def get_accounts():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("""
-            SELECT a.*, 
-                   COUNT(DISTINCT e.id) as engineer_count,
+            SELECT a.*,
+                   COUNT(DISTINCT c.id) as contact_count,
                    COUNT(DISTINCT s.id) as signal_count
             FROM accounts a
-            LEFT JOIN engineers e ON e.account_id = a.id
+            LEFT JOIN contacts c ON c.account_id = a.id
             LEFT JOIN signals s ON s.account_id = a.id
             GROUP BY a.id
             ORDER BY a.signal_score DESC, a.name
@@ -128,21 +235,15 @@ async def get_account(account_id: int):
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def create_account(name: str, github_org: str, account_type: str, engineers: list[str],
-                         ticker_symbol: str = None, news_name: str = None):
+async def create_account(name: str, district_domain: str = None, account_type: str = "prospect",
+                         nces_id: str = None, district_legal_name: str = None):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO accounts (name, github_org, account_type, ticker_symbol, news_name) VALUES (?, ?, ?, ?, ?)",
-            (name, github_org, account_type, ticker_symbol or None, news_name or None)
+            """INSERT INTO accounts (name, district_domain, account_type, nces_id, district_legal_name)
+               VALUES (?, ?, ?, ?, ?)""",
+            (name, district_domain or None, account_type, nces_id or None, district_legal_name or None)
         )
         account_id = cursor.lastrowid
-        for username in engineers:
-            username = username.strip()
-            if username:
-                await db.execute(
-                    "INSERT OR IGNORE INTO engineers (account_id, github_username) VALUES (?, ?)",
-                    (account_id, username)
-                )
         await db.commit()
         return account_id
 
@@ -151,24 +252,20 @@ async def delete_account(account_id: int):
         await db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         await db.commit()
 
-async def update_account(account_id: int, name: str = None, github_org: str = None, account_type: str = None,
-                         ticker_symbol: str = None, news_name: str = None):
+async def update_account(account_id: int, name: str = None, district_domain: str = None,
+                         account_type: str = None, nces_id: str = None,
+                         district_legal_name: str = None):
     updates, values = [], []
     if name is not None:
-        updates.append("name = ?")
-        values.append(name)
-    if github_org is not None:
-        updates.append("github_org = ?")
-        values.append(github_org)
+        updates.append("name = ?"); values.append(name)
+    if district_domain is not None:
+        updates.append("district_domain = ?"); values.append(district_domain or None)
     if account_type is not None:
-        updates.append("account_type = ?")
-        values.append(account_type)
-    if ticker_symbol is not None:
-        updates.append("ticker_symbol = ?")
-        values.append(ticker_symbol or None)
-    if news_name is not None:
-        updates.append("news_name = ?")
-        values.append(news_name or None)
+        updates.append("account_type = ?"); values.append(account_type)
+    if nces_id is not None:
+        updates.append("nces_id = ?"); values.append(nces_id or None)
+    if district_legal_name is not None:
+        updates.append("district_legal_name = ?"); values.append(district_legal_name or None)
     if not updates:
         return await get_account(account_id)
     values.append(account_id)
@@ -177,24 +274,62 @@ async def update_account(account_id: int, name: str = None, github_org: str = No
         await db.commit()
     return await get_account(account_id)
 
-async def get_engineers(account_id: int):
+
+async def update_account_essa(account_id: int, total_enrollment: int = None,
+                               title1_status: str = None, per_pupil_expenditure: int = None,
+                               technology_spend: int = None):
+    updates, values = [], []
+    if total_enrollment is not None:
+        updates.append("total_enrollment = ?"); values.append(total_enrollment)
+    if title1_status is not None:
+        updates.append("title1_status = ?"); values.append(title1_status)
+    if per_pupil_expenditure is not None:
+        updates.append("per_pupil_expenditure = ?"); values.append(per_pupil_expenditure)
+    if technology_spend is not None:
+        updates.append("technology_spend = ?"); values.append(technology_spend)
+    if not updates:
+        return
+    values.append(account_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?", values)
+        await db.commit()
+
+
+# ── Contacts ──────────────────────────────────────────────────────────────────
+
+async def get_contacts(account_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM engineers WHERE account_id = ?", (account_id,)
+            "SELECT * FROM contacts WHERE account_id = ? ORDER BY role, name", (account_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-async def upsert_engineer(account_id: int, username: str, display_name: str = None, avatar_url: str = None, company: str = None):
+
+async def add_contact(account_id: int, name: str = None, role: str = None,
+                      email: str = None, linkedin_url: str = None, phone: str = None,
+                      avatar_url: str = None):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO engineers (account_id, github_username, display_name, avatar_url, company)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(account_id, github_username)
-            DO UPDATE SET display_name = excluded.display_name, avatar_url = excluded.avatar_url,
-                          company = COALESCE(excluded.company, engineers.company)
-        """, (account_id, username, display_name, avatar_url, company))
+        cursor = await db.execute(
+            """INSERT OR IGNORE INTO contacts
+               (account_id, name, role, email, linkedin_url, phone, avatar_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (account_id, name, role, email or None, linkedin_url or None, phone or None, avatar_url or None)
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def remove_contact(contact_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+        await db.commit()
+
+
+async def assign_contact_team(contact_id: int, team_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE contacts SET team_id = ? WHERE id = ?", (team_id, contact_id))
         await db.commit()
 
 async def get_signals(account_id: int, limit: int = 500, per_engineer: int = 40):
@@ -322,19 +457,15 @@ async def update_account_meta(account_id: int, score: int, avatar_url: str = Non
         await db.commit()
 
 async def add_engineer_to_account(account_id: int, username: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR IGNORE INTO engineers (account_id, github_username) VALUES (?, ?)",
-            (account_id, username.strip())
-        )
-        await db.commit()
+    """Kept for backward compat; adds a contact with no email."""
+    await add_contact(account_id, name=username, role="Contact")
+
 
 async def remove_engineer(engineer_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM engineers WHERE id = ?", (engineer_id,))
-        await db.commit()
+    await remove_contact(engineer_id)
 
-# ── Teams ─────────────────────────────────────────────────────────────────────
+
+# ── Teams (Schools) ───────────────────────────────────────────────────────────
 async def get_teams(account_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -376,9 +507,8 @@ async def delete_team(team_id: int):
         await db.commit()
 
 async def assign_engineer_team(engineer_id: int, team_id):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE engineers SET team_id = ? WHERE id = ?", (team_id, engineer_id))
-        await db.commit()
+    await assign_contact_team(engineer_id, team_id)
+
 
 # ── Signal Tags ────────────────────────────────────────────────────────────────
 async def tag_signal(signal_id: int, account_id: int, theme: str):
@@ -464,3 +594,246 @@ async def get_latest_report(account_id: int):
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+# ── RFPs ──────────────────────────────────────────────────────────────────────
+async def save_rfp(account_id: int, title: str, agency: str, posted_date: str,
+                   due_date: str, url: str, estimated_value: int,
+                   description: str, naics_code: str, source: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT OR IGNORE INTO rfps
+              (account_id, title, agency, posted_date, due_date, url,
+               estimated_value, description, naics_code, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (account_id, title, agency, posted_date, due_date, url,
+              estimated_value, description, naics_code, source))
+        await db.commit()
+        return cursor.lastrowid or 0
+
+async def get_rfps(account_id: int = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if account_id:
+            async with db.execute(
+                "SELECT * FROM rfps WHERE account_id = ? ORDER BY posted_date DESC, created_at DESC",
+                (account_id,)
+            ) as cur:
+                return [dict(r) for r in await cur.fetchall()]
+        async with db.execute(
+            "SELECT r.*, a.name as account_name, a.district_domain FROM rfps r "
+            "JOIN accounts a ON a.id = r.account_id ORDER BY posted_date DESC, r.created_at DESC"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+async def save_rfp_draft(rfp_id: int, draft: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE rfps SET proposal_draft = ? WHERE id = ?", (draft, rfp_id))
+        await db.commit()
+
+async def get_rfp(rfp_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM rfps WHERE id = ?", (rfp_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+async def delete_rfp(rfp_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM rfps WHERE id = ?", (rfp_id,))
+        await db.commit()
+
+# ── Conferences ───────────────────────────────────────────────────────────────
+async def upsert_conference(name: str, start_date: str, end_date: str,
+                             location: str, city: str, url: str,
+                             theme_tags: list, attendee_count: int,
+                             is_virtual: bool, notes: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            INSERT INTO conferences
+              (name, start_date, end_date, location, city, url,
+               theme_tags, attendee_count, is_virtual, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name, start_date) DO UPDATE SET
+              end_date=excluded.end_date, location=excluded.location,
+              city=excluded.city, url=excluded.url,
+              theme_tags=excluded.theme_tags, attendee_count=excluded.attendee_count,
+              is_virtual=excluded.is_virtual, notes=excluded.notes
+        """, (name, start_date, end_date, location, city, url,
+              json.dumps(theme_tags), attendee_count, int(is_virtual), notes))
+        await db.commit()
+        return cursor.lastrowid or 0
+
+async def get_conferences(upcoming_only: bool = True):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if upcoming_only:
+            async with db.execute(
+                "SELECT * FROM conferences WHERE start_date >= date('now') ORDER BY start_date",
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT * FROM conferences ORDER BY start_date DESC"
+            ) as cur:
+                rows = await cur.fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["theme_tags"] = json.loads(d.get("theme_tags") or "[]")
+        except Exception:
+            d["theme_tags"] = []
+        result.append(d)
+    return result
+
+# ── Spend Intelligence ─────────────────────────────────────────────────────────
+async def save_spend_award(account_id: int, vendor: str, amount: int,
+                            year: int, program: str, cfda: str,
+                            award_type: str, data_source: str = "usaspending"):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO spend_intel
+              (account_id, vendor, amount, year, program, cfda, award_type, data_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (account_id, vendor, amount, year, program, cfda, award_type, data_source))
+        await db.commit()
+
+async def get_spend_intel(account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM spend_intel WHERE account_id = ? ORDER BY year DESC, amount DESC",
+            (account_id,)
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+async def clear_spend_intel(account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM spend_intel WHERE account_id = ?", (account_id,))
+        await db.commit()
+
+
+# ── Texas Districts ───────────────────────────────────────────────────────────
+
+async def upsert_texas_district(district_id: str, district_name: str, esc_region: int,
+                                 enrollment: int = None, accountability_rating: str = None,
+                                 staar_reading_pct: float = None, staar_math_pct: float = None,
+                                 staar_sped_reading_pct: float = None, staar_sped_math_pct: float = None,
+                                 grad_rate: float = None, teacher_turnover_pct: float = None,
+                                 sped_student_pct: float = None, chronic_absent_pct: float = None,
+                                 trouble_score: int = 0, trouble_flags: list = None):
+    flags_json = json.dumps(trouble_flags or [])
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO texas_districts
+                (district_id, district_name, esc_region, enrollment, accountability_rating,
+                 staar_reading_pct, staar_math_pct, staar_sped_reading_pct, staar_sped_math_pct,
+                 grad_rate, teacher_turnover_pct, sped_student_pct, chronic_absent_pct,
+                 trouble_score, trouble_flags, last_fetched)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(district_id) DO UPDATE SET
+                district_name=excluded.district_name,
+                esc_region=excluded.esc_region,
+                enrollment=excluded.enrollment,
+                accountability_rating=excluded.accountability_rating,
+                staar_reading_pct=excluded.staar_reading_pct,
+                staar_math_pct=excluded.staar_math_pct,
+                staar_sped_reading_pct=excluded.staar_sped_reading_pct,
+                staar_sped_math_pct=excluded.staar_sped_math_pct,
+                grad_rate=excluded.grad_rate,
+                teacher_turnover_pct=excluded.teacher_turnover_pct,
+                sped_student_pct=excluded.sped_student_pct,
+                chronic_absent_pct=excluded.chronic_absent_pct,
+                trouble_score=excluded.trouble_score,
+                trouble_flags=excluded.trouble_flags,
+                last_fetched=excluded.last_fetched
+        """, (district_id, district_name, esc_region, enrollment, accountability_rating,
+              staar_reading_pct, staar_math_pct, staar_sped_reading_pct, staar_sped_math_pct,
+              grad_rate, teacher_turnover_pct, sped_student_pct, chronic_absent_pct,
+              trouble_score, flags_json, now))
+        await db.commit()
+
+
+async def get_texas_districts_by_region(esc_region: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM texas_districts WHERE esc_region = ? ORDER BY trouble_score DESC, district_name",
+            (esc_region,)
+        ) as cur:
+            rows = await cur.fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["trouble_flags"] = json.loads(d["trouble_flags"] or "[]")
+                except Exception:
+                    d["trouble_flags"] = []
+                if d.get("babbage_pitch"):
+                    try:
+                        d["babbage_pitch"] = json.loads(d["babbage_pitch"])
+                    except Exception:
+                        pass
+                if d.get("client_report"):
+                    try:
+                        d["client_report"] = json.loads(d["client_report"])
+                    except Exception:
+                        pass
+                result.append(d)
+            return result
+
+
+async def get_texas_district(district_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM texas_districts WHERE district_id = ?", (district_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            try:
+                d["trouble_flags"] = json.loads(d["trouble_flags"] or "[]")
+            except Exception:
+                d["trouble_flags"] = []
+            if d.get("babbage_pitch"):
+                try:
+                    d["babbage_pitch"] = json.loads(d["babbage_pitch"])
+                except Exception:
+                    pass
+            if d.get("client_report"):
+                try:
+                    d["client_report"] = json.loads(d["client_report"])
+                except Exception:
+                    pass
+            return d
+
+
+async def update_texas_district_pitch(district_id: str, pitch_json: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE texas_districts SET babbage_pitch = ? WHERE district_id = ?",
+            (pitch_json, district_id)
+        )
+        await db.commit()
+
+
+async def update_texas_district_client_report(district_id: str, report_json: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE texas_districts SET client_report = ? WHERE district_id = ?",
+            (report_json, district_id)
+        )
+        await db.commit()
+
+
+async def link_texas_district_account(district_id: str, account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE texas_districts SET account_id = ? WHERE district_id = ?",
+            (account_id, district_id)
+        )
+        await db.commit()
+

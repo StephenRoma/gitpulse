@@ -3,11 +3,11 @@ import { Spinner } from '@blueprintjs/core'
 import AccountLogo from './AccountLogo'
 
 const STAGES = [
-  { key: 'prospecting', label: 'Prospecting', color: '#2563EB', bg: '#EFF6FF', bd: '#BFDBFE' },
-  { key: 'qualified',   label: 'Qualified',   color: '#0369A1', bg: '#E0F2FE', bd: '#BAE6FD' },
-  { key: 'engaged',     label: 'Engaged',     color: '#D97706', bg: '#FFFBEB', bd: '#FDE68A' },
-  { key: 'proposal',    label: 'Proposal',    color: '#7C3AED', bg: '#F5F3FF', bd: '#DDD6FE' },
-  { key: 'won',         label: 'Won / Lost',  color: '#166534', bg: '#F0FDF4', bd: '#BBF7D0' },
+  { key: 'prospecting',  label: 'Prospecting',  color: '#2563EB', bg: '#EFF6FF', bd: '#BFDBFE' },
+  { key: 'researched',   label: 'Researched',   color: '#0369A1', bg: '#E0F2FE', bd: '#BAE6FD' },
+  { key: 'engaged',      label: 'Engaged',      color: '#D97706', bg: '#FFFBEB', bd: '#FDE68A' },
+  { key: 'proposal',     label: 'Proposal',     color: '#7C3AED', bg: '#F5F3FF', bd: '#DDD6FE' },
+  { key: 'partnership',  label: 'Partnership',  color: '#166534', bg: '#F0FDF4', bd: '#BBF7D0' },
 ]
 const STAGE_KEYS  = STAGES.map(s => s.key)
 const STAGE_MAP   = Object.fromEntries(STAGES.map(s => [s.key, s]))
@@ -81,9 +81,9 @@ function AccountCard({ account, stage, onAdvance, onRetreat, onOpen }) {
             fontSize: 11, fontWeight: 700, color: isLost ? 'var(--text-muted)' : 'var(--navy)',
             fontFamily: 'var(--display)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>{account.name}</div>
-          {account.github_org && (
+          {account.district_domain && (
             <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>
-              {account.github_org}
+              {account.district_domain}
             </div>
           )}
         </div>
@@ -122,11 +122,10 @@ function AccountCard({ account, stage, onAdvance, onRetreat, onOpen }) {
           }}
         >→</button>
 
-        {/* Won / Lost toggle (only in last column) */}
-        {stage === 'won' && (
+            {stage === 'partnership' && (
           <button
             onClick={() => onAdvance(account.id, !account._lost)}
-            title={account._lost ? 'Mark as Won' : 'Mark as Lost'}
+            title={account._lost ? 'Mark as Active' : 'Mark as Churned'}
             style={{
               fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
               border: `1px solid ${account._lost ? '#BBF7D0' : '#FECDD3'}`,
@@ -134,7 +133,7 @@ function AccountCard({ account, stage, onAdvance, onRetreat, onOpen }) {
               color: account._lost ? '#166534' : '#B91C1C',
               fontFamily: 'var(--mono)', lineHeight: 1,
             }}
-          >{account._lost ? 'WON' : 'LOST'}</button>
+          >{account._lost ? 'ACTIVE' : 'CHURNED'}</button>
         )}
       </div>
     </div>
@@ -239,7 +238,7 @@ export default function DashboardPage({ accounts = [], stages = {}, onSetStage, 
   const totalAccounts  = accounts.length
   const activeAccounts = accounts.filter(a => {
     const s = stages[a.id] || 'prospecting'
-    return s !== 'won'
+    return s !== 'partnership'
   }).length
   const hotCount = accounts.filter(a => (a.signal_score ?? 0) >= 60).length
 
@@ -283,7 +282,7 @@ export default function DashboardPage({ accounts = [], stages = {}, onSetStage, 
             }}
           >
             {syncing ? <Spinner size={12} /> : '↻'}
-            {syncing ? 'SYNCING...' : 'SYNC ALL'}
+            {syncing ? 'SCANNING...' : 'SCAN ALL'}
           </button>
         </div>
       </div>
@@ -343,7 +342,7 @@ export default function DashboardPage({ accounts = [], stages = {}, onSetStage, 
         <div>
           <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 700,
             letterSpacing: '0.12em', color: 'var(--text-faint)', marginBottom: 12 }}>
-            HOTTEST SIGNALS ACROSS ALL ACCOUNTS
+            PRIORITY SIGNALS ACROSS ALL ACCOUNTS
           </div>
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
@@ -355,7 +354,7 @@ export default function DashboardPage({ accounts = [], stages = {}, onSetStage, 
             ) : hotSignals.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', fontSize: 12,
                 color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>
-                No signals yet. Sync accounts to start collecting data.
+                No signals yet. Run a Scan to start collecting district signals.
               </div>
             ) : (
               hotSignals.map((sig, i) => (
