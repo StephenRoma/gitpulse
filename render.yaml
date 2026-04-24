@@ -14,7 +14,7 @@ services:
       - key: DB_PATH
         value: /data/quorum.db
       - key: ALLOWED_ORIGINS
-        value: https://quorum-frontend.onrender.com
+        value: https://quorum-frontend.onrender.com,https://quorum-qu7p.onrender.com
       # Add your secret keys in the Render dashboard (do not commit them here):
       # ANTHROPIC_API_KEY, etc.
 
@@ -27,7 +27,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://quorum-backend.onrender.com
+        value: https://quorum-qu7p.onrender.com
     routes:
       - type: rewrite
         source: /*
