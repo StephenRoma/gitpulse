@@ -4,7 +4,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(os.environ.get("DB_PATH", Path(__file__).parent / "quorum.db"))
+DB_PATH = Path(os.environ.get("DB_PATH", str(Path(__file__).parent / "quorum.db")))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
